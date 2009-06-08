@@ -1,0 +1,63 @@
+# Scalable Extensible Build System
+# Copyright (c) 2009 Kenton Varda.  All rights reserved.
+
+import os.path
+
+class PythonLibrary(Rule):
+  def __init__(self, srcs):
+    super(PythonLibrary, self).__init__()
+    self.srcs = [self.context.source_artifact(src) for src in srcs]
+    self.outputs = []
+
+class PythonBinary(Rule):
+  def __init__(self, name, main, srcs=[], deps=[]):
+    super(PythonBinary, self).__init__()
+    
+    transitive_sources = [self.context.source_artifact(src) for src in srcs]
+    for dep in deps:
+      transitive_sources.extend(dep.srcs)
+    
+    make_bin = self.context.source_artifact("make_py_binary.py")
+    action = self.context.action(self, [make_bin] + transitive_sources, "par")
+    output = self.context.output_artifact("bin", name, action)
+    action.add_command([make_bin, main, output] + transitive_sources)
+    self.outputs = [output]
+
+class PythonTest(Rule):
+  def __init__(self, main, deps = []):
+    super(PythonTest, self).__init__()
+
+    main_artifact = self.context.source_artifact(main)
+    run_test = self.context.source_artifact("run_test.py")
+    inputs = [main_artifact, run_test]
+    for dep in deps:
+      inputs.extend(dep.srcs)
+    action = self.context.action(self, inputs, "test", main_artifact.filename)
+
+    output = self.context.intermediate_artifact(
+      os.path.splitext(main)[0] + "_output.txt", action)
+    self.outputs = [output]
+
+    action.add_command(["python", run_test, output, main_artifact,
+                        "python", main_artifact])
+
+sebs_lib = PythonLibrary([
+  "__init__.py",
+  "core.py",
+  "filesystem.py",
+  "helpers.py",
+  "loader.py",
+  "builder.py",
+  "main.py"])
+
+sebs = PythonBinary(
+  name = "sebs",
+  main = "sebs.main",
+  srcs = [ "main.py" ],
+  deps = [ sebs_lib ])
+
+core_test = PythonTest("core_test.py", deps = [sebs_lib])
+filesystem_test = PythonTest("filesystem_test.py", deps = [sebs_lib])
+helpers_test = PythonTest("helpers_test.py", deps = [sebs_lib])
+loader_test = PythonTest("loader_test.py", deps = [sebs_lib])
+builder_test = PythonTest("builder_test.py", deps = [sebs_lib])
