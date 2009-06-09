@@ -4,7 +4,7 @@
 
 import unittest
 
-from sebs.core import DefinitionError
+from sebs.core import Rule, Test, DefinitionError
 from sebs.filesystem import VirtualDirectory
 from sebs.loader import Loader
 
@@ -50,6 +50,7 @@ class ContextImplTest(unittest.TestCase):
     self.dir.add("src/foo/bar.sebs", 0, """
 mock_rule = Rule()
 return_context = mock_rule.context
+mock_test = Test()
 """)
 
     self.loader = Loader(self.dir)
@@ -60,6 +61,11 @@ return_context = mock_rule.context
     self.assertEqual("foo/bar.sebs", self.context.filename)
     self.assertEqual("src/foo/bar.sebs", self.context.full_filename)
     
+  def testRules(self):
+    self.assertTrue(isinstance(self.file.mock_rule, Rule))
+    self.assertTrue(isinstance(self.file.mock_test, Test))
+    self.assertTrue(self.file.mock_test.context is self.context)
+
   def testSourceArtifact(self):
     artifact1 = self.context.source_artifact("qux")
     artifact2 = self.context.source_artifact("corge")
@@ -82,11 +88,12 @@ return_context = mock_rule.context
     self.assertEqual(1, len(action.inputs))
     self.assertTrue(action.inputs[0] is artifact)
 
-    action2 = self.context.action(self.file.mock_rule, [], verb = "test")
-    self.assertEqual("test", action2.verb)
+    action2 = self.context.action(self.file.mock_rule, [])
     
-    self.assertEqual("run: foo", action.message())
-    self.assertEqual("test: foo/bar.sebs:mock_rule", action2.message())
+    self.assertEqual("run", action.verb)
+    self.assertEqual("foo", action.name)
+    self.assertEqual("build", action2.verb)
+    self.assertEqual("foo/bar.sebs:mock_rule", action2.name)
     
   def testDerivedArtifact(self):
     action = self.context.action(self.file.mock_rule, [])

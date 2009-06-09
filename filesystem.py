@@ -2,6 +2,7 @@
 # Copyright (c) 2009 Kenton Varda.  All rights reserved.
 
 import os
+import time
 
 from sebs.helpers import typecheck
 
@@ -20,15 +21,15 @@ class Directory(object):
     1970."""
     raise NotImplementedError
 
+  def touch(self, filename, mtime=None):
+    """Set the modification time of the file to the current time, or to mtime
+    if given."""
+    raise NotImplementedError
+
   def execfile(self, filename, context):
     """Execute the file as a Python script.  "context" is a dict containing
     pre-defined global variables.  On return, it will additionally contain
     variables defined by the script."""
-    raise NotImplementedError
-    
-  def mkdir(self, path):
-    """Make the given directory if it doesn't exist, including parents if
-    necessary."""
     raise NotImplementedError
 
 class DiskDirectory(Directory):
@@ -45,6 +46,13 @@ class DiskDirectory(Directory):
   def getmtime(self, filename):
     return os.path.getmtime(os.path.join(self.__path, filename))
 
+  def touch(self, filename, mtime=None):
+    path = os.path.join(self.__path, filename)
+    if mtime is None:
+      os.utime(path, None)
+    else:
+      os.utime(path, (mtime, mtime))
+  
   def execfile(self, filename, globals):
     # Can't just call execfile() because we want the filename in tracebacks
     # to exactly match the filename parameter to this method.
@@ -79,6 +87,15 @@ class VirtualDirectory(Directory):
       raise os.error("File not found: " + filename)
     (mtime, content) = self.__files[filename]
     return mtime
+
+  def touch(self, filename, mtime=None):
+    typecheck(filename, basestring)
+    if filename not in self.__files:
+      raise os.error("File not found: " + filename)
+    if mtime is None:
+      mtime = time.time()
+    oldtime, content = self.__files[filename]
+    self.__files[filename] = (mtime, content)
 
   def execfile(self, filename, globals):
     typecheck(filename, basestring)

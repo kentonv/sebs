@@ -23,23 +23,24 @@ class PythonBinary(Rule):
     action.add_command([make_bin, main, output] + transitive_sources)
     self.outputs = [output]
 
-class PythonTest(Rule):
+class PythonTest(Test):
   def __init__(self, main, deps = []):
     super(PythonTest, self).__init__()
 
     main_artifact = self.context.source_artifact(main)
-    run_test = self.context.source_artifact("run_test.py")
-    inputs = [main_artifact, run_test]
+    inputs = [main_artifact]
     for dep in deps:
       inputs.extend(dep.srcs)
     action = self.context.action(self, inputs, "test", main_artifact.filename)
 
     output = self.context.intermediate_artifact(
       os.path.splitext(main)[0] + "_output.txt", action)
-    self.outputs = [output]
 
-    action.add_command(["python", run_test, output, main_artifact,
-                        "python", main_artifact])
+    action.add_command(["python", main_artifact])
+    action.capture_stdout(output, include_stderr=True)
+
+    self.test_action = action
+    self.outputs = []
 
 sebs_lib = PythonLibrary([
   "__init__.py",

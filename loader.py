@@ -3,7 +3,7 @@
 
 import os
 
-from sebs.core import Rule, Artifact, Action, Context, DefinitionError
+from sebs.core import Rule, Test, Artifact, Action, Context, DefinitionError
 from sebs.filesystem import Directory
 from sebs.helpers import typecheck
 
@@ -98,9 +98,12 @@ class Loader(object):
     context = _ContextImpl(self, filename)
     
     def run():
+      # TODO(kenton):  Remove SEBS itself from PYTHONPATH before parsing, since
+      #   SEBS files should not be importing the SEBS implementation.
       vars = {
         "sebs_import": self.load,
-        "Rule": Rule
+        "Rule": Rule,
+        "Test": Test
       }
       self.__root_dir.execfile(context.full_filename, vars)
       return vars
@@ -114,6 +117,7 @@ class Loader(object):
     # Delete "builtins".
     del vars["sebs_import"]
     del vars["Rule"]
+    del vars["Test"]
     
     for name in vars.keys():
       if name.startswith("_"):

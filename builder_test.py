@@ -16,6 +16,7 @@ class MockRunner(ActionRunner):
   
   def run(self, action):
     self.actions.append(action)
+    return True
 
 class MockContext(Context):
   def __init__(self, filename, full_filename):

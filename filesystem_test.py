@@ -5,6 +5,7 @@
 import os
 import shutil
 import tempfile
+import time
 import unittest
 
 from sebs.filesystem import Directory, DiskDirectory, VirtualDirectory
@@ -31,6 +32,19 @@ class DirectoryTest(unittest.TestCase):
     
     self.assertEquals(123, self.dir.getmtime("foo"))
     
+    # Make sure touch() sets mtime to the current time.
+    start = time.time()
+    self.dir.touch("foo")
+    end = time.time()
+    mtime = self.dir.getmtime("foo")
+    # Give a one-second buffer in case the filesystem rounds floating-point
+    # times to an integer.
+    self.assertTrue(start - 1 <= mtime and mtime <= end + 1)
+    
+    # Try a touch with an explicit time.
+    self.dir.touch("foo", 321)
+    self.assertEquals(321, self.dir.getmtime("foo"))
+  
   def testExecfile(self):
     self.addFile("foo", 123,
       "x = i + 5\n"

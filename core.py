@@ -119,7 +119,7 @@ class Action(object):
     self.inputs = inputs
     self.outputs = []  # Filled in by Artifact.__init__()
     self.verb = verb
-    self.name = name
+    self.__name = name
     self.commands = []  # Filled in by add_command().
     self.stdout = None
     self.merge_standard_outs = False
@@ -129,12 +129,13 @@ class Action(object):
     for input in inputs:
       input.dependents.append(self)
 
-  def message(self):
-    if self.name is None:
-      name = self.rule.name
+  def __get_name(self):
+    if self.__name is None:
+      return self.rule.name
     else:
-      name = self.name
-    return "%s: %s" % (self.verb, name)
+      return self.__name
+
+  name = property(__get_name)
   
   def add_command(self, command):
     """Add a command to the Action.  The command is a list of arguments like
@@ -317,3 +318,12 @@ class Rule(object):
       return "%s:%s" % (self.context.filename, self.label)
 
   name = property(__get_name)
+
+class Test(Rule):
+  """A special kind of Rule that represents a test.
+  
+  Attributes (in addition to Rule's attributes):
+    test_action  An action which, when executed, runs the test.  The command
+                 should exit normally if the test passes or with an error code
+                 if it fails.  The test should always capture stdout and stderr
+                 to a file."""

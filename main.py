@@ -31,7 +31,7 @@ import getopt
 import sys
 
 from sebs.builder import Builder, DryRunner, SubprocessRunner
-from sebs.core import Rule
+from sebs.core import Rule, Test
 from sebs.filesystem import DiskDirectory
 from sebs.helpers import typecheck
 from sebs.loader import Loader
@@ -86,10 +86,16 @@ def build(argv):
   root_dir = DiskDirectory(".")
   loader = Loader(root_dir)
   builder = Builder(root_dir)
-  for rule in list(_args_to_rules(loader, args)):
-    builder.add_rule(rule)
   
-  builder.build(runner)
+  if argv[0] == "test":
+    for rule in list(_args_to_rules(loader, args)):
+      if isinstance(rule, Test):
+        builder.add_test(rule)
+    builder.test(runner)
+  else:
+    for rule in list(_args_to_rules(loader, args)):
+      builder.add_rule(rule)
+    builder.build(runner)
 
   return 0
 
@@ -107,10 +113,10 @@ def main(argv):
   if len(args) == 0:
     raise UsageError("Missing command.")
   
-  if args[0] == "build":
+  if args[0] in ("build", "test"):
     return build(args)
   else:
-    raise UsageError("Currently the only recognized command is 'build'.")
+    raise UsageError("Unknown command: %s" % args[0])
 
 if __name__ == "__main__":
   try:

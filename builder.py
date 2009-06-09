@@ -5,12 +5,9 @@ import collections
 import os
 import subprocess
 
-from sebs.core import Rule, Action, Artifact, ContentToken, DefinitionError
+from sebs.core import Rule, Test, Action, Artifact, ContentToken, DefinitionError
 from sebs.filesystem import Directory
 from sebs.helpers import typecheck
-
-class CommandFailedError(Exception):
-  pass
 
 class ActionRunner(object):
   """Abstract interface for an object which can execute actions."""
@@ -19,6 +16,8 @@ class ActionRunner(object):
     pass
   
   def run(self, action):
+    """Executes the given action.  Returns true if the command succeeds, false
+    if it fails."""
     raise NotImplementedError
 
 class DryRunner(ActionRunner):
@@ -31,7 +30,7 @@ class DryRunner(ActionRunner):
   def run(self, action):
     typecheck(action, Action)
 
-    self.__output.write(action.message() + "\n")
+    self.__output.write("%s: %s\n" % (action.verb, action.name))
 
     if action.stdout is None:
       suffix = []
@@ -41,6 +40,8 @@ class DryRunner(ActionRunner):
     for command in action.commands:
       formatted = list(self.__format_command(command))
       print " ", " ".join(formatted + suffix)
+
+    return True
   
   def __format_command(self, command):
     for arg in command:
@@ -60,10 +61,18 @@ class SubprocessRunner(ActionRunner):
   
   def __init__(self):
     super(SubprocessRunner, self).__init__()
+    
+    self.__env = os.environ.copy()
+    
+    # TODO(kenton):  We should *add* src to the existing PYTHONPATH instead of
+    #   overwrite, but there is one problem:  The SEBS Python archive may be
+    #   in PYTHONPATH, and we do NOT want programs that we run to be able to
+    #   take advantage of that to import SEBS implementation modules.
+    self.__env["PYTHONPATH"] = "src"
   
   def run(self, action):
     typecheck(action, Action)
-    print action.message()
+    print "%s: %s" % (action.verb, action.name)
     
     # Make sure the output directories exist.
     for output in action.outputs:
@@ -91,15 +100,25 @@ class SubprocessRunner(ActionRunner):
     for command in action.commands:
       formatted_command = list(self.__format_command(command))
       proc = subprocess.Popen(formatted_command,
-                              stdout = stdout, stderr = stderr)
+                              stdout = stdout, stderr = stderr,
+                              env = self.__env)
+
+      if stderr is not None and stderr is not stdout:
+        stderr.close()
+      if stdout is not None:
+        stdout.close()
+
       if proc.wait() != 0:
-        # Clean outputs in case the command touched them before failing.
+        # Set modification time of all outputs to zero to make sure they are
+        # rebuilt on the next run.
         for output in action.outputs:
           try:
-            os.remove(output.filename)
+            os.utime(output.filename, (0, 0))
           except Exception:
             pass
-        raise CommandFailedError(" ".join(formatted_command))
+        return False
+
+    return True
 
   def __format_command(self, command, split_content=True):
     for arg in command:
@@ -221,9 +240,13 @@ class Builder(object):
   def __init__(self, root_dir):
     typecheck(root_dir, Directory)
     
+    self.__state_map = _StateMap(root_dir)
+
     # Actions which are ready but haven't been started.
     self.__action_queue = collections.deque()
-    self.__state_map = _StateMap(root_dir)
+
+    self.__test_queue = collections.deque()
+    self.__test_results = []
     
   def add_artifact(self, artifact):
     typecheck(artifact, Artifact)
@@ -251,12 +274,28 @@ class Builder(object):
     for artifact in rule.outputs:
       self.add_artifact(artifact)
   
+  def add_test(self, test):
+    typecheck(test, Test)
+    if test.test_action.stdout is None:
+      raise DefinitionError(
+        "Test actions must capture stdout.  Offending rule: %s" % test.name)
+    
+    for input in test.test_action.inputs:
+      self.add_artifact(input)
+    
+    if self.__state_map.artifact_state(test.test_action.stdout).is_dirty:
+      self.__test_queue.append(test)
+    else:
+      self.__test_results.append((test.name, test, True))
+  
   def build(self, action_runner):
     typecheck(action_runner, ActionRunner)
     
     while len(self.__action_queue) > 0:
       action = self.__action_queue.popleft()
-      action_runner.run(action)
+      if not action_runner.run(action):
+        print "BUILD FAILED"
+        return False
       
       newly_ready = []
       
@@ -277,3 +316,39 @@ class Builder(object):
       # sources of both libraries before linking either one.
       newly_ready.reverse()
       self.__action_queue.extendleft(newly_ready)
+    
+    return True
+
+  def test(self, action_runner):
+    if not self.build(action_runner):
+      return False
+    
+    while len(self.__test_queue) > 0:
+      test = self.__test_queue.popleft()
+      
+      # TODO(kenton):  Don't use colors if not outputting to a terminal.
+      result = action_runner.run(test.test_action)
+      if result:
+        print "\033[1;32mPASS:\033[1;m", test.name
+      else:
+        print "\033[1;31mFAIL:\033[1;m", test.name
+        print " ", test.test_action.stdout.filename
+
+      self.__test_results.append((test.name, test, result))
+
+    self.__test_results.sort()
+    
+    print "\nTest results:"
+    
+    for name, test, result in self.__test_results:
+      if result:
+        indicator = "\033[1;32mPASSED\033[1;m"
+      else:
+        indicator = "\033[1;31mFAILED\033[1;m"
+    
+      print "  %-70s %s" % (name, indicator)
+      
+      if not result:
+        print "   ", test.test_action.stdout.filename
+    
+    return True
