@@ -28,25 +28,43 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-python = sebs_import("sebs/python.sebs")
+import os.path
 
-sebs_lib = python.Library([
-  "__init__.py",
-  "core.py",
-  "filesystem.py",
-  "helpers.py",
-  "loader.py",
-  "builder.py",
-  "main.py"])
+class Library(Rule):
+  def __init__(self, srcs):
+    super(Library, self).__init__()
+    self.srcs = [self.context.source_artifact(src) for src in srcs]
+    self.outputs = []
 
-sebs = python.Binary(
-  name = "sebs",
-  main = "sebs.main",
-  srcs = [ "main.py" ],
-  deps = [ sebs_lib ])
+class Binary(Rule):
+  def __init__(self, name, main, srcs=[], deps=[]):
+    super(Binary, self).__init__()
+    
+    transitive_sources = [self.context.source_artifact(src) for src in srcs]
+    for dep in deps:
+      transitive_sources.extend(dep.srcs)
+    
+    make_bin = self.context.source_artifact("make_py_binary.py")
+    action = self.context.action(self, [make_bin] + transitive_sources, "par")
+    output = self.context.output_artifact("bin", name, action)
+    action.add_command([make_bin, main, output] + transitive_sources)
+    self.outputs = [output]
 
-core_test = python.Test("core_test.py", deps = [sebs_lib])
-filesystem_test = python.Test("filesystem_test.py", deps = [sebs_lib])
-helpers_test = python.Test("helpers_test.py", deps = [sebs_lib])
-loader_test = python.Test("loader_test.py", deps = [sebs_lib])
-builder_test = python.Test("builder_test.py", deps = [sebs_lib])
+class Test(Test):
+  def __init__(self, main, deps = []):
+    super(Test, self).__init__()
+
+    main_artifact = self.context.source_artifact(main)
+    inputs = [main_artifact]
+    for dep in deps:
+      inputs.extend(dep.srcs)
+    action = self.context.action(self, inputs, "test", main_artifact.filename)
+
+    output = self.context.intermediate_artifact(
+      os.path.splitext(main)[0] + "_output.txt", action)
+
+    action.add_command(["python", main_artifact])
+    action.capture_stdout(output, include_stderr=True)
+
+    self.test_action = action
+    self.outputs = []

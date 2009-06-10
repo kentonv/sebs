@@ -141,10 +141,18 @@ class Loader(object):
     finally:
       del self.__loaded_files[filename]
     
-    # Delete "builtins".
-    del vars["sebs_import"]
-    del vars["Rule"]
-    del vars["Test"]
+    # Copy the vars before deleting anything because any functions defined in
+    # the file still hold a reference to the original map as part of their
+    # environment, so modifying the original map could break those functions.
+    vars = vars.copy()
+    
+    # Delete "builtins", but not if the user replaced them with their own defs.
+    if vars["sebs_import"] == self.load:
+      del vars["sebs_import"]
+    if vars["Rule"] == Rule:
+      del vars["Rule"]
+    if vars["Test"] == Test:
+      del vars["Test"]
     
     for name in vars.keys():
       if name.startswith("_"):

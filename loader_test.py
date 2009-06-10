@@ -46,6 +46,8 @@ x = 123
 _private = "hi"
 a_rule = Rule()
 nested_rule = [Rule()]
+def func():
+  return _private
 """)
     file = self.loader.load("foo.sebs")
     
@@ -59,6 +61,7 @@ nested_rule = [Rule()]
     self.assertEqual(5, file.nested_rule[0].line)
     self.assertEqual("foo.sebs:a_rule", file.a_rule.name)
     self.assertEqual("foo.sebs:5", file.nested_rule[0].name)
+    self.assertEqual("hi", file.func())
 
   def testImport(self):
     self.dir.add("src/foo.sebs", 0, """bar = sebs_import("bar.sebs")""")
@@ -70,6 +73,18 @@ nested_rule = [Rule()]
   def testCycle(self):
     self.dir.add("src/foo.sebs", 0, """sebs_import("foo.sebs")""")
     self.assertRaises(DefinitionError, self.loader.load, "foo.sebs")
+
+  def testOverrideBuiltins(self):
+    self.dir.add("src/foo.sebs", 0, """
+sebs_import = 123
+Rule = "foo"
+Test = "bar"
+""")
+    file = self.loader.load("foo.sebs")
+    
+    self.assertEqual(123, file.sebs_import)
+    self.assertEqual("foo", file.Rule)
+    self.assertEqual("bar", file.Test)
 
 class ContextImplTest(unittest.TestCase):
   def setUp(self):
