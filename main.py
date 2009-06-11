@@ -61,7 +61,7 @@ from sebs.builder import Builder, DryRunner, SubprocessRunner
 from sebs.core import Rule, Test
 from sebs.filesystem import DiskDirectory
 from sebs.helpers import typecheck
-from sebs.loader import Loader
+from sebs.loader import Loader, BuildFile
 
 class UsageError(Exception):
   pass
@@ -73,30 +73,18 @@ def _args_to_rules(loader, args):
   typecheck(args, list, basestring)
   
   for arg in args:
-    parts = arg.split(":")
-    if len(parts) > 2:
-      raise UsageError("Invalid rule identifier: %s" % arg)
+    if arg.startswith("src/") or arg.startswith("src\\"):
+      arg = arg[4:]
+    target = loader.load(arg)
     
-    filename = parts[0]
-    filename = filename.replace("\\", "/")
-    if filename.startswith("src/"):
-      filename = filename[4:]
-    file = loader.load(filename)
-    
-    if len(parts) == 1:
-      for name in file.__dict__:
-        value = file.__dict__[name]
+    if isinstance(target, BuildFile):
+      for name, value in target.__dict__.items():
         if isinstance(value, Rule):
           yield value
+    elif not isinstance(target, Rule):
+      raise UsageError("%s: Does not name a rule." % arg)
     else:
-      try:
-        rule = eval(parts[1], file.__dict__.copy())
-      except Exception, e:
-        raise UsageError("%s: %s" % (arg, e.message))
-      
-      if not isinstance(rule, Rule):
-        raise UsageError("%s: '%s' does not name a rule." % (arg, parts[1]))
-      yield rule
+      yield target
 
 def build(argv):
   try:

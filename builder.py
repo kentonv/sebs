@@ -372,7 +372,7 @@ class Builder(object):
         indicator = "\033[1;32mPASSED\033[1;m"
       else:
         indicator = "\033[1;31mFAILED\033[1;m"
-    
+      
       print "  %-70s %s" % (name, indicator)
       
       if not result:

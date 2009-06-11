@@ -99,13 +99,33 @@ class Loader(object):
     self.__derived_artifacts = {}
     self.__root_dir = root_dir
 
-  def load(self, filename):
+  def load(self, targetname):
     """Load a SEBS file.  The filename is given relative to the root of
     the source tree (the "src" directory).  Returns an object whose fields
     correspond to the globals defined in that file."""
     
-    typecheck(filename, basestring)
+    typecheck(targetname, basestring)
     
+    parts = targetname.rsplit(":", 1)
+    
+    file = self.__load_file(parts[0])
+    
+    if len(parts) == 1:
+      return file
+    else:
+      try:
+        target = eval(parts[1], file.__dict__.copy())
+      except Exception, e:
+        raise DefinitionError("%s: %s" % (targetname, e.message))
+      return target
+
+  def __load_file(self, filename):
+    """Load a SEBS file.  The filename is given relative to the root of
+    the source tree (the "src" directory).  Returns an object whose fields
+    correspond to the globals defined in that file."""
+
+    typecheck(filename, basestring)
+
     normalized = os.path.normpath(filename).replace("\\", "/")
     if filename != normalized:
       raise DefinitionError(
@@ -115,6 +135,9 @@ class Loader(object):
     if filename.startswith("../") or filename.startswith("/"):
       raise DefinitionError(
         "'%s' is not within src." % filename)
+    
+    if self.__root_dir.isdir("src/" + filename):
+      filename = filename + "/SEBS"
     
     if filename in self.__loaded_files:
       existing = self.__loaded_files[filename]

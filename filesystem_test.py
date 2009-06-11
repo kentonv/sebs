@@ -48,12 +48,26 @@ class DirectoryTest(unittest.TestCase):
     """Add a file to self.dir."""
     raise NotImplementedError
   
+  def addDirectory(self, name):
+    """Add a directory to self.dir."""
+    raise NotImplementedError
+  
   def testExists(self):
     self.addFile("foo", 123, "Hello world!")
     
     self.assertTrue(self.dir.exists("foo"))
     self.assertFalse(self.dir.exists("bar"))
     
+  def testIsdir(self):
+    self.addDirectory("foo/bar/baz")
+    self.assertTrue(self.dir.isdir("foo"))
+    self.assertTrue(self.dir.isdir("foo/bar"))
+    self.assertTrue(self.dir.isdir("foo/bar/baz"))
+    self.assertFalse(self.dir.isdir("nosuchdir"))
+
+    self.addFile("somefile", 123, "Hello world!")
+    self.assertFalse(self.dir.isdir("somefile"))
+  
   def testGetMTime(self):
     self.addFile("foo", 123, "Hello world!")
     
@@ -105,6 +119,9 @@ class DiskDirectoryTest(DirectoryTest):
     f.close()
     os.utime(path, (mtime, mtime))
 
+  def addDirectory(self, name):
+    os.makedirs(os.path.join(self.tempdir, name))
+
 class VirtualDirectoryTest(DirectoryTest):
   def setUp(self):
     self.dir = VirtualDirectory()
@@ -113,6 +130,8 @@ class VirtualDirectoryTest(DirectoryTest):
   def addFile(self, name, mtime, content):
     self.dir.add(name, mtime, content)
 
+  def addDirectory(self, name):
+    self.dir.add_directory(name)
 
 # TODO(kenton):  There has got to be a better way to convince the testing
 #   framework to skip over DirectoryTest.

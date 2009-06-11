@@ -40,7 +40,12 @@ class Directory(object):
     pass
   
   def exists(self, filename):
-    """Check if the given file exists."""
+    """Check if the given file exists, returning true or false."""
+    raise NotImplementedError
+  
+  def isdir(self, filename):
+    """Check if the given file is a directory, returning true or false.  If
+    the file doesn't exist, this returns false."""
     raise NotImplementedError
   
   def getmtime(self, filename):
@@ -70,6 +75,9 @@ class DiskDirectory(Directory):
   def exists(self, filename):
     return os.path.exists(os.path.join(self.__path, filename))
   
+  def isdir(self, filename):
+    return os.path.isdir(os.path.join(self.__path, filename))
+  
   def getmtime(self, filename):
     return os.path.getmtime(os.path.join(self.__path, filename))
 
@@ -93,8 +101,11 @@ class VirtualDirectory(Directory):
   def __init__(self):
     super(VirtualDirectory, self).__init__()
     self.__files = {}
+    self.__dirs = set()
   
   def add(self, filename, mtime, content):
+    """Add a file to the VirtualDirectory.  Automatically adds parent
+    directories as needed."""
     typecheck(filename, basestring)
     typecheck(content, basestring)
     
@@ -103,10 +114,23 @@ class VirtualDirectory(Directory):
     else:
       typecheck(mtime, float)
     self.__files[filename] = (mtime, content)
+    self.add_directory(os.path.dirname(filename))
+  
+  def add_directory(self, filename):
+    """Add a subdirectory to the VirtualDirectory.  Automatically adds parent
+    directories as needed."""
+    typecheck(filename, basestring)
+    if filename != "":
+      self.__dirs.add(filename)
+      self.add_directory(os.path.dirname(filename))
   
   def exists(self, filename):
     typecheck(filename, basestring)
-    return filename in self.__files
+    return filename in self.__files or filename in self.__dirs
+  
+  def isdir(self, filename):
+    typecheck(filename, basestring)
+    return filename in self.__dirs
   
   def getmtime(self, filename):
     typecheck(filename, basestring)

@@ -339,10 +339,13 @@ class Rule(object):
         # loop here and repeatedly overwrite self.line.
 
   def __get_name(self):
+    sebsfile = self.context.filename
+    if sebsfile.endswith("/SEBS"):
+      sebsfile = sebsfile[:-5]
     if self.label is None:
-      return "%s:%d" % (self.context.filename, self.line)
+      return "%s:%d" % (sebsfile, self.line)
     else:
-      return "%s:%s" % (self.context.filename, self.label)
+      return "%s:%s" % (sebsfile, self.label)
 
   name = property(__get_name)
 

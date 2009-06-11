@@ -86,6 +86,17 @@ Test = "bar"
     self.assertEqual("foo", file.Rule)
     self.assertEqual("bar", file.Test)
 
+  def testLoadDirectory(self):
+    self.dir.add("src/foo/bar/SEBS", 0, "x = 123")
+    file = self.loader.load("foo/bar")
+    self.assertEqual(123, file.x)
+
+  def testLoadTarget(self):
+    self.dir.add("src/foo/bar/SEBS", 0, "x = 123")
+    self.dir.add("src/baz.sebs", 0, "y = 'abc'")
+    self.assertEqual(123, self.loader.load("foo/bar:x"))
+    self.assertEqual("abc", self.loader.load("baz.sebs:y"))
+
 class ContextImplTest(unittest.TestCase):
   def setUp(self):
     self.dir = VirtualDirectory()
