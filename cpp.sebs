@@ -1,0 +1,127 @@
+# Scalable Extensible Build System
+# Copyright (c) 2009 Kenton Varda.  All rights reserved.
+# http://code.google.com/p/sebs
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+#     * Redistributions of source code must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above
+# copyright notice, this list of conditions and the following disclaimer
+# in the documentation and/or other materials provided with the
+# distribution.
+#     * Neither the name of the SEBS project nor the names of its
+# contributors may be used to endorse or promote products derived from
+# this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import os.path
+import md5
+
+class _Base(Rule):
+  def __init__(self, srcs, deps):
+    super(_Base, self).__init__()
+
+    self.srcs = []
+    self.objects = []
+    for src in srcs:
+      src_artifact = self.context.source_artifact(src)
+      self.srcs.append(src_artifact)
+      name, ext = os.path.splitext(src)
+      if ext in ["c", "C", "cc", "cpp", "cxx", "c++"]:
+        action = self.context.action(self, [src_artifact], "compile",
+                                     src_artifact.filename)
+        obj = self.context.intermediate_artifact(name + ".o", action)
+        self.objects.append(obj)
+        action.add_command(["c++", "-c", src_artifact, "-o", obj])
+      elif if ext not in ["h", "H", "hh", "hpp", "hxx", "h++"]:
+        raise DefinitionError("Not a C++ source or header: %s" % name)
+
+    self.transitive_deps = set()
+    for dep in deps:
+      self.transitive_deps.add(dep.static_lib)
+      self.transitive_deps.update(dep.transitive_deps)
+
+  def digest_source_names(self):
+    # Create a stable, unique temporary name for the library.
+    input_digest = md5.new()
+    for src in srcs:
+      input_digest.update(src)
+    return input_digest.hexdigest()[-8:]
+
+class Library(_Base):
+  def __init__(self, name=None, srcs=[], deps=[]):
+    super(Library, self).__init__(srcs, deps)
+    
+    static_link_action = self.context.action(self, self.objects, "link")
+
+    if name is None:
+      name = self.digest_source_names()
+
+      # Output library to intermediate directory.
+      static_lib = self.context.intermediate_artifact("lib%s.a" % name,
+                                                      static_link_action)
+    else:
+      # Output library to lib directory.
+      static_lib = self.context.output_artifact("lib", "lib%s.a" % name,
+                                                static_link_action)
+      static_link_action.name = static_lib.filename
+
+    # Remove existing library, since we don't know if it was created with the
+    # same set of sources.  It appears the "ar" command does not have any
+    # option for "remove any files that aren't in the list".
+    static_link_action.add_command(["rm", static_lib])
+    
+    # Create the library archive, with a symbol table.
+    static_link_action.add_command(["ar", "-qcs", static_lib] + objects)
+    
+    self.static_library = static_lib
+    self.outputs = [static_lib]
+
+class Binary(_Base):
+  def __init__(self, name=None, srcs=[], deps=[]):
+    super(Binary, self).__init__(srcs, deps)
+
+    link_action = self.context.action(self, self.objects, "link")
+
+    if name is None:
+      name = self.digest_source_names()
+
+      # Output library to intermediate directory.
+      output = self.context.intermediate_artifact("%s_bin" % name, link_action)
+    else:
+      output = self.context.output_artifact("bin", name, link_action)
+
+    link_action.add_command(
+      ["c++", "-o", output] + self.objects + self.transitive_deps)
+    
+    self.binary = output
+    self.outputs = [output]
+
+class Test(Test):
+  def __init__(self, srcs=[], deps=[]):
+    super(Test, self).__init__()
+    
+    binary_rule = Binary(None, srcs, deps)
+
+    action = self.context.action(self, binary_rule.binary, "test")
+    output = self.context.intermediate_artifact(
+      os.path.splitext(main)[0] + "_output.txt", action)
+    action.add_command([binary_rule.binary])
+    action.capture_stdout(output, include_stderr=True)
+    
+    self.test_action = action
+    self.outputs = []
