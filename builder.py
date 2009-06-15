@@ -367,15 +367,17 @@ class Builder(object):
     
     print "\nTest results:"
     
+    had_failure = False
     for name, test, result in self.__test_results:
       if result:
         indicator = "\033[1;32mPASSED\033[1;m"
       else:
         indicator = "\033[1;31mFAILED\033[1;m"
+        had_failure = True
       
       print "  %-70s %s" % (name, indicator)
       
       if not result:
         print "   ", test.test_action.stdout.filename
     
-    return True
+    return not had_failure

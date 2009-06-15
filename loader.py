@@ -153,7 +153,8 @@ class Loader(object):
       vars = {
         "sebs_import": self.load,
         "Rule": Rule,
-        "Test": Test
+        "Test": Test,
+        "DefinitionError": DefinitionError
       }
       self.__root_dir.execfile(context.full_filename, vars)
       return vars

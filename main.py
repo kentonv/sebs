@@ -106,13 +106,16 @@ def build(argv):
     for rule in list(_args_to_rules(loader, args)):
       if isinstance(rule, Test):
         builder.add_test(rule)
-    builder.test(runner)
+    success = builder.test(runner)
   else:
     for rule in list(_args_to_rules(loader, args)):
       builder.add_rule(rule)
-    builder.build(runner)
+    success = builder.build(runner)
 
-  return 0
+  if success:
+    return 0
+  else:
+    return 1
 
 def main(argv):
   try:

@@ -34,6 +34,8 @@ import md5
 class _Base(Rule):
   def __init__(self, srcs, deps):
     super(_Base, self).__init__()
+    
+    cflags = ["c++", "-Isrc"]
 
     self.srcs = []
     self.objects = []
@@ -41,25 +43,29 @@ class _Base(Rule):
       src_artifact = self.context.source_artifact(src)
       self.srcs.append(src_artifact)
       name, ext = os.path.splitext(src)
-      if ext in ["c", "C", "cc", "cpp", "cxx", "c++"]:
+      if ext in [".c", ".C", ".cc", ".cpp", ".cxx", ".c++"]:
         action = self.context.action(self, [src_artifact], "compile",
                                      src_artifact.filename)
         obj = self.context.intermediate_artifact(name + ".o", action)
         self.objects.append(obj)
-        action.add_command(["c++", "-c", src_artifact, "-o", obj])
-      elif if ext not in ["h", "H", "hh", "hpp", "hxx", "h++"]:
-        raise DefinitionError("Not a C++ source or header: %s" % name)
+        action.add_command(cflags + ["-c", src_artifact, "-o", obj])
+      elif ext not in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
+        raise DefinitionError(
+          "File extension not recognized as a C++ source or header: %s" % src)
 
     self.transitive_deps = set()
     for dep in deps:
-      self.transitive_deps.add(dep.static_lib)
+      if not isinstance(dep, Library):
+        raise DefinitionError(
+          "Dependency of C++ rule is not a C++ library: %s" % dep)
+      self.transitive_deps.add(dep.static_library)
       self.transitive_deps.update(dep.transitive_deps)
 
-  def digest_source_names(self):
+  def anonymous_name(self):
     # Create a stable, unique temporary name for the library.
     input_digest = md5.new()
-    for src in srcs:
-      input_digest.update(src)
+    for obj in self.objects:
+      input_digest.update(obj.filename)
     return input_digest.hexdigest()[-8:]
 
 class Library(_Base):
@@ -69,7 +75,7 @@ class Library(_Base):
     static_link_action = self.context.action(self, self.objects, "link")
 
     if name is None:
-      name = self.digest_source_names()
+      name = self.anonymous_name()
 
       # Output library to intermediate directory.
       static_lib = self.context.intermediate_artifact("lib%s.a" % name,
@@ -78,15 +84,14 @@ class Library(_Base):
       # Output library to lib directory.
       static_lib = self.context.output_artifact("lib", "lib%s.a" % name,
                                                 static_link_action)
-      static_link_action.name = static_lib.filename
 
     # Remove existing library, since we don't know if it was created with the
     # same set of sources.  It appears the "ar" command does not have any
     # option for "remove any files that aren't in the list".
-    static_link_action.add_command(["rm", static_lib])
+    static_link_action.add_command(["rm", "-f", static_lib])
     
     # Create the library archive, with a symbol table.
-    static_link_action.add_command(["ar", "-qcs", static_lib] + objects)
+    static_link_action.add_command(["ar", "-qcs", static_lib] + self.objects)
     
     self.static_library = static_lib
     self.outputs = [static_lib]
@@ -95,18 +100,18 @@ class Binary(_Base):
   def __init__(self, name=None, srcs=[], deps=[]):
     super(Binary, self).__init__(srcs, deps)
 
-    link_action = self.context.action(self, self.objects, "link")
+    all_inputs = self.objects + list(self.transitive_deps)
+    link_action = self.context.action(self, all_inputs, "link")
 
     if name is None:
-      name = self.digest_source_names()
+      name = self.anonymous_name()
 
       # Output library to intermediate directory.
       output = self.context.intermediate_artifact("%s_bin" % name, link_action)
     else:
       output = self.context.output_artifact("bin", name, link_action)
 
-    link_action.add_command(
-      ["c++", "-o", output] + self.objects + self.transitive_deps)
+    link_action.add_command(["c++", "-o", output] + all_inputs)
     
     self.binary = output
     self.outputs = [output]
@@ -117,9 +122,9 @@ class Test(Test):
     
     binary_rule = Binary(None, srcs, deps)
 
-    action = self.context.action(self, binary_rule.binary, "test")
+    action = self.context.action(self, [binary_rule.binary], "test")
     output = self.context.intermediate_artifact(
-      os.path.splitext(main)[0] + "_output.txt", action)
+      os.path.splitext(srcs[0])[0] + "_output.txt", action)
     action.add_command([binary_rule.binary])
     action.capture_stdout(output, include_stderr=True)
     
