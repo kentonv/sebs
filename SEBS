@@ -56,13 +56,15 @@ import os
 class ShellTest(Test):
   def __init__(self, src):
     super(Test, self).__init__()
-
-    main_artifact = self.context.source_artifact(src)
+    self.src = src
+  
+  def _expand(self):
+    main_artifact = self.context.source_artifact(self.src)
     action = self.context.action(self, [main_artifact],
                                  "test", main_artifact.filename)
 
     output = self.context.intermediate_artifact(
-      os.path.splitext(src)[0] + "_output.txt", action)
+      os.path.splitext(self.src)[0] + "_output.txt", action)
 
     action.add_command([main_artifact])
     action.capture_stdout(output, include_stderr=True)

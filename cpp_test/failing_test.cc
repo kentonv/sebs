@@ -33,7 +33,7 @@
 #include <sebs/cpp_test/foo.h>
 
 int main() {
-  FooFunction("foo");
+  FooFunction("fail");
   std::cout << std::endl;
   return 1;
 }

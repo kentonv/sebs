@@ -298,15 +298,20 @@ class Builder(object):
   def add_rule(self, rule):
     typecheck(rule, Rule)
     
+    rule.expand_once()
+
     for artifact in rule.outputs:
       self.add_artifact(artifact)
   
   def add_test(self, test):
     typecheck(test, Test)
+
+    test.expand_once()
+
     if test.test_action.stdout is None:
       raise DefinitionError(
         "Test actions must capture stdout.  Offending rule: %s" % test.name)
-    
+
     for input in test.test_action.inputs:
       self.add_artifact(input)
     

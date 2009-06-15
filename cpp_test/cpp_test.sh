@@ -34,11 +34,9 @@ SEBS='python -m sebs.main'
 
 set -e
 
-OUTPUT=tmp/sebs/cpp_test/output
-
-function expect_output_contains() {
-  if ! grep -q "$1" $OUTPUT; then
-    echo "Missing expected output: $1" >&2
+function expect_contains() {
+  if ! grep -q "$2" $1; then
+    echo "Missing expected output: $2" >&2
     exit 1
   fi
 }
@@ -65,36 +63,41 @@ mkdir -p tmp/sebs/cpp_test
 
 echo "Building test binary..."
 
-expect_success '$SEBS build sebs/cpp_test/cpp_test.sebs:prog &> $OUTPUT'
+OUTPUT=tmp/sebs/cpp_test/output
 
-expect_output_contains '^compile: src/sebs/cpp_test/main.cc$'
-expect_output_contains '^compile: src/sebs/cpp_test/bar.cc$'
-expect_output_contains '^link: sebs/cpp_test/cpp_test.sebs:bar$'
-expect_output_contains '^compile: src/sebs/cpp_test/foo.cc$'
-expect_output_contains '^link: sebs/cpp_test/cpp_test.sebs:foo$'
-expect_output_contains '^link: sebs/cpp_test/cpp_test.sebs:prog$'
+expect_success "$SEBS build sebs/cpp_test/cpp_test.sebs:prog &> $OUTPUT"
+
+expect_contains $OUTPUT '^compile: src/sebs/cpp_test/main.cc$'
+expect_contains $OUTPUT '^compile: src/sebs/cpp_test/bar.cc$'
+expect_contains $OUTPUT '^link: sebs/cpp_test/cpp_test.sebs:bar$'
+expect_contains $OUTPUT '^compile: src/sebs/cpp_test/foo.cc$'
+expect_contains $OUTPUT '^link: sebs/cpp_test/cpp_test.sebs:foo$'
+expect_contains $OUTPUT '^link: sebs/cpp_test/cpp_test.sebs:prog$'
 
 echo "Running test binary..."
 
 expect_success './bin/sebs_cpp_test &> $OUTPUT'
 
-expect_output_contains '^FooFunction(foo) BarFunction(bar) FooFunction(bar) $'
+expect_contains $OUTPUT '^FooFunction(foo) BarFunction(bar) FooFunction(bar) $'
 
 echo "Running passing test..."
 
-expect_success '$SEBS test sebs/cpp_test/cpp_test.sebs:passing_test &> $OUTPUT'
+expect_success "$SEBS test sebs/cpp_test/cpp_test.sebs:passing_test &> $OUTPUT"
 
 # TODO(kenton):  When SEBS is fixed to only use color when outputting to a
 #   terminal, we can make these matches more precise.  (Below, too.)
-expect_output_contains 'PASS:.* sebs/cpp_test/cpp_test.sebs:passing_test$'
+expect_contains $OUTPUT 'PASS:.* sebs/cpp_test/cpp_test.sebs:passing_test$'
+
+expect_contains tmp/sebs/cpp_test/passing_test_output.txt \
+  '^BarFunction(test) FooFunction(test) $'
 
 echo "Running failing test..."
 
-expect_failure '$SEBS test sebs/cpp_test/cpp_test.sebs:failing_test &> $OUTPUT'
+expect_failure "$SEBS test sebs/cpp_test/cpp_test.sebs:failing_test &> $OUTPUT"
 
-expect_output_contains 'FAIL:.* sebs/cpp_test/cpp_test.sebs:failing_test$'
+expect_contains $OUTPUT 'FAIL:.* sebs/cpp_test/cpp_test.sebs:failing_test$'
 
-# TODO(kenton):  Verify test output.  Hard to do now because file names are
-#   hard to predict.
+expect_contains tmp/sebs/cpp_test/failing_test_output.txt \
+  '^FooFunction(fail) $'
 
 echo "PASS"

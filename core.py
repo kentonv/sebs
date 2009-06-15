@@ -316,7 +316,8 @@ class Rule(object):
             if the rule was anonymous.
     outputs List of Artifacts which should be built when this Rule is specified
             on the SEBS command line.  It is the responsibility of the Rule
-            subclass to initialize this attribute."""
+            subclass to initialize this attribute.  Normally this attribute
+            is not initialized until expand_once() has been called."""
 
   def __init__(self, context=None):
     typecheck(context, Context)
@@ -330,6 +331,7 @@ class Rule(object):
     self.context = context
     self.line = -1
     self.label = None
+    self.__expanded = False
     
     for file, line, function, text in traceback.extract_stack():
       if file == context.full_filename:
@@ -348,6 +350,24 @@ class Rule(object):
       return "%s:%s" % (sebsfile, self.label)
 
   name = property(__get_name)
+  
+  def _expand(self):
+    """Expand the Rule to build its Action graph.  This is called the first
+    time expand_once() is called.  Subclasses should override this."""
+    raise NotImplementedError
+  
+  def expand_once(self):
+    """Called to build the Rule's action graph.  The first time this is called,
+    self._expand() will be called; subsequent calls have no effect.  Subclasses
+    should override _expand() to construct the action graph for the rule when
+    called, placing a list of the final outputs in self.outputs.  During
+    _expand(), a Rule must call expand_once() on each of its direct
+    dependencies."""
+    
+    # TODO(kenton):  Detect recursion?
+    if not self.__expanded:
+      self._expand()
+      self.__expanded = True
 
 class Test(Rule):
   """A special kind of Rule that represents a test.
@@ -356,4 +376,5 @@ class Test(Rule):
     test_action  An action which, when executed, runs the test.  The command
                  should exit normally if the test passes or with an error code
                  if it fails.  The test should always capture stdout and stderr
-                 to a file."""
+                 to a file.  As with Rule.outputs, test_action is not actually
+                 computed until expand_once() is called."""

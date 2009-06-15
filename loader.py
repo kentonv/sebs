@@ -178,13 +178,13 @@ class Loader(object):
     if vars["Test"] == Test:
       del vars["Test"]
     
-    for name in vars.keys():
+    for name, value in vars.items():
+      if isinstance(value, Rule) and value.context is context:
+        # Set label on rule instance.
+        value.label = name
       if name.startswith("_"):
         # Delete private variable.
         del vars[name]
-      elif isinstance(vars[name], Rule) and vars[name].context == context:
-        # Set label on rule instance.
-        vars[name].label = name
 
     build_file = BuildFile(vars)
     self.__loaded_files[filename] = build_file

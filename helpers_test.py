@@ -42,5 +42,10 @@ class HelpersTest(unittest.TestCase):
     self.assertRaises(TypeError, typecheck, ["foo", "bar"], list, int)
     self.assertRaises(TypeError, typecheck, [123, "bar"], list, int)
 
+    self.assertEqual(123, typecheck(123, [int, float, str]))
+    self.assertEqual(1.5, typecheck(1.5, [int, float, str]))
+    self.assertEqual("foo", typecheck("foo", [int, float, str]))
+    self.assertRaises(TypeError, typecheck, [12], [int, float, str])
+
 if __name__ == "__main__":
   unittest.main()
