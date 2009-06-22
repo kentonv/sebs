@@ -201,6 +201,8 @@ class _ArtifactState(object):
         input_state = state_map.artifact_state(input)
         if input_state.is_dirty or self.timestamp < input_state.timestamp:
           self.is_dirty = True
+      if self.timestamp < artifact.action.rule.context.timestamp:
+        self.is_dirty = True
 
 class _ActionState(object):
   def __init__(self, action, root_dir, state_map):

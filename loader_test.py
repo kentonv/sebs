@@ -107,6 +107,22 @@ bar3 = sebs.import_("//bar/bar.sebs")
     self.assertEqual(123, self.loader.load("foo/bar:x"))
     self.assertEqual("abc", self.loader.load("baz.sebs:y"))
 
+  def testTimestamp(self):
+    self.dir.add("src/foo.sebs", 1, """""")
+    self.dir.add("src/bar.sebs", 0, """sebs.import_("foo.sebs")""")
+    self.dir.add("src/baz.sebs", 2, """sebs.import_("foo.sebs")""")
+    self.dir.add("src/qux.sebs", 0, """sebs.import_("bar.sebs")""")
+    self.dir.add("src/quux.sebs", 0, """
+sebs.import_("baz.sebs")
+sebs.import_("qux.sebs")
+""")
+
+    self.assertEqual(1, self.loader.load_with_timestamp("foo.sebs")[1])
+    self.assertEqual(1, self.loader.load_with_timestamp("bar.sebs")[1])
+    self.assertEqual(2, self.loader.load_with_timestamp("baz.sebs")[1])
+    self.assertEqual(1, self.loader.load_with_timestamp("qux.sebs")[1])
+    self.assertEqual(2, self.loader.load_with_timestamp("quux.sebs")[1])
+
 class ContextImplTest(unittest.TestCase):
   def setUp(self):
     self.dir = VirtualDirectory()

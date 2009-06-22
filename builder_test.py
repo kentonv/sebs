@@ -51,12 +51,13 @@ class MockContext(Context):
     super(MockContext, self).__init__()
     self.filename = filename
     self.full_filename = full_filename
-
-DUMMY_RULE = Rule(MockContext("mock.sebs", "src/mock.sebs"))
+    self.timestamp = 0
 
 class BuilderTest(unittest.TestCase):
   def setUp(self):
     self.dir = VirtualDirectory()
+    self.context = MockContext("mock.sebs", "src/mock.sebs")
+    self.rule = Rule(self.context)
   
   def doBuild(self, *artifacts):
     builder = Builder(self.dir)
@@ -75,7 +76,7 @@ class BuilderTest(unittest.TestCase):
 
   def testSimpleAction(self):
     input = Artifact("input", None)
-    action = Action(DUMMY_RULE, [input], "")
+    action = Action(self.rule, [input], "")
     output = Artifact("output", action)
     
     # output doesn't exist.
@@ -89,11 +90,15 @@ class BuilderTest(unittest.TestCase):
     # output exists and is newer than input.
     self.dir.add("output", 4, "")
     self.assertEqual([], self.doBuild(output))
+    
+    # SEBS file is newer than output.
+    self.context.timestamp = 5
+    self.assertEqual([action], self.doBuild(output))
 
   def testMultipleInputsAndOutputs(self):
     in1 = Artifact("in1", None)
     in2 = Artifact("in2", None)
-    action = Action(DUMMY_RULE, [in1, in2], "")
+    action = Action(self.rule, [in1, in2], "")
     out1 = Artifact("out1", action)
     out2 = Artifact("out2", action)
     
@@ -123,9 +128,9 @@ class BuilderTest(unittest.TestCase):
 
   def testActionWithDependency(self):
     input = Artifact("input", None)
-    action1 = Action(DUMMY_RULE, [input], "")
+    action1 = Action(self.rule, [input], "")
     temp = Artifact("temp", action1)
-    action2 = Action(DUMMY_RULE, [temp], "")
+    action2 = Action(self.rule, [temp], "")
     output = Artifact("output", action2)
     
     # outputs don't exist.
@@ -160,11 +165,11 @@ class BuilderTest(unittest.TestCase):
 
   def testDiamondDependency(self):
     input = Artifact("input", None)
-    action1 = Action(DUMMY_RULE, [input], "")
+    action1 = Action(self.rule, [input], "")
     temp1 = Artifact("temp1", action1)
-    action2 = Action(DUMMY_RULE, [input], "")
+    action2 = Action(self.rule, [input], "")
     temp2 = Artifact("temp2", action2)
-    action3 = Action(DUMMY_RULE, [temp1, temp2], "")
+    action3 = Action(self.rule, [temp1, temp2], "")
     output = Artifact("output", action3)
     
     # outputs don't exist.

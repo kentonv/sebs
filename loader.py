@@ -36,7 +36,7 @@ from sebs.filesystem import Directory
 from sebs.helpers import typecheck
 
 class _ContextImpl(Context):
-  def __init__(self, loader, filename):
+  def __init__(self, loader, filename, root_dir):
     typecheck(loader, Loader)
     typecheck(filename, basestring)
     
@@ -44,6 +44,7 @@ class _ContextImpl(Context):
     self.filename = filename
     self.full_filename = os.path.join("src", filename)
     self.directory = os.path.dirname(filename)
+    self.timestamp = root_dir.getmtime(self.full_filename)
 
   def source_artifact(self, filename):
     self.__validate_artifact_name(filename)
@@ -92,7 +93,7 @@ class BuildFile(object):
     self.__dict__.update(vars)
 
 class _Builtins(object):
-  def __init__(self, loader, filename):
+  def __init__(self, loader, context):
     self.Rule = Rule
     self.Test = Test
     self.Artifact = Artifact
@@ -100,7 +101,8 @@ class _Builtins(object):
     self.DefinitionError = DefinitionError
     self.typecheck = typecheck
     self.__loader = loader
-    parts = filename.rsplit("/", 1)
+    self.__context = context
+    parts = context.filename.rsplit("/", 1)
     if len(parts) == 1:
       self.__prefix = ""
     else:
@@ -112,7 +114,10 @@ class _Builtins(object):
       name = name[2:]
     else:
       name = self.__prefix + name
-    return self.__loader.load(name)
+    (result, timestamp) = self.__loader.load_with_timestamp(name)
+    if timestamp > self.__context.timestamp:
+      self.__context.timestamp = timestamp
+    return result
 
 class Loader(object):
   def __init__(self, root_dir):
@@ -128,20 +133,27 @@ class Loader(object):
     the source tree (the "src" directory).  Returns an object whose fields
     correspond to the globals defined in that file."""
     
+    return self.load_with_timestamp(targetname)[0]
+    
+  def load_with_timestamp(self, targetname):
+    """Like load(), but returns a tuple where the second element is the target's
+    timestamp.  This is most-recent modification time of the SEBS file defining
+    the target and those that it imports."""
+    
     typecheck(targetname, basestring)
     
     parts = targetname.rsplit(":", 1)
     
-    file = self.__load_file(parts[0])
+    (file, context) = self.__load_file(parts[0])
     
     if len(parts) == 1:
-      return file
+      return (file, context.timestamp)
     else:
       try:
         target = eval(parts[1], file.__dict__.copy())
       except Exception, e:
         raise DefinitionError("%s: %s" % (targetname, e.message))
-      return target
+      return (target, context.timestamp)
 
   def __load_file(self, filename):
     """Load a SEBS file.  The filename is given relative to the root of
@@ -169,8 +181,8 @@ class Loader(object):
         raise DefinitionError("File recursively imports itself: %s", filename)
       return existing
     
-    context = _ContextImpl(self, filename)
-    builtins = _Builtins(self, filename)
+    context = _ContextImpl(self, filename, self.__root_dir)
+    builtins = _Builtins(self, context)
     
     def run():
       # TODO(kenton):  Remove SEBS itself from PYTHONPATH before parsing, since
@@ -203,8 +215,8 @@ class Loader(object):
         del vars[name]
 
     build_file = BuildFile(vars)
-    self.__loaded_files[filename] = build_file
-    return build_file
+    self.__loaded_files[filename] = (build_file, context)
+    return (build_file, context)
 
   def source_artifact(self, filename):
     typecheck(filename, basestring)
