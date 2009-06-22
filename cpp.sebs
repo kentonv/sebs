@@ -32,7 +32,7 @@
 import os.path
 import md5
 
-class _Base(Rule):
+class _Base(sebs.Rule):
   def __init__(self, srcs, deps):
     super(_Base, self).__init__()
     self.srcs = srcs
@@ -52,13 +52,13 @@ class _Base(Rule):
         self.objects.append(obj)
         action.add_command(cflags + ["-c", src_artifact, "-o", obj])
       elif ext not in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
-        raise DefinitionError(
+        raise sebs.DefinitionError(
           "File extension not recognized as a C++ source or header: %s" % src)
 
     self.transitive_deps = set()
     for dep in self.deps:
       if not isinstance(dep, Library):
-        raise DefinitionError(
+        raise sebs.DefinitionError(
           "Dependency of C++ rule is not a C++ library: %s" % dep)
       dep.expand_once()
       self.transitive_deps.add(dep.static_library)
@@ -128,7 +128,7 @@ class Binary(_Base):
     self.binary = output
     self.outputs = [output]
 
-class Test(Test):
+class Test(sebs.Test):
   def __init__(self, srcs=[], deps=[]):
     super(Test, self).__init__()
     self.__binary_rule = Binary(None, srcs, deps)

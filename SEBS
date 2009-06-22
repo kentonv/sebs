@@ -29,7 +29,10 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-python = sebs_import("sebs/python.sebs")
+# The standard builtin "sebs" conflicts with a target defined in this file.
+_sebs = sebs
+
+python = _sebs.import_("sebs/python.sebs")
 
 sebs_lib = python.Library([
   "__init__.py",
@@ -54,9 +57,9 @@ builder_test = python.Test("builder_test.py", deps = [sebs_lib])
 
 # TODO(kenton):  Move elsewhere.
 import os
-class ShellTest(Test):
+class ShellTest(_sebs.Test):
   def __init__(self, src):
-    super(Test, self).__init__()
+    super(ShellTest, self).__init__()
     self.src = src
   
   def _expand(self):

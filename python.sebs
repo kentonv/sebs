@@ -33,7 +33,7 @@ import os.path
 
 # TODO(kenton):  Factor out common dependency handling code.
 
-class Library(Rule):
+class Library(sebs.Rule):
   def __init__(self, srcs):
     super(Library, self).__init__()
     self.srcs = srcs
@@ -44,7 +44,7 @@ class Library(Rule):
       self.src_artifacts.append(self.context.source_artifact(src))
     self.outputs = []
 
-class Binary(Rule):
+class Binary(sebs.Rule):
   # TODO(kenton):  Rename "name" to "output", make it optional -- if not
   #   given, use label and output only to tmp.
   def __init__(self, name, main, srcs=[], deps=[]):
@@ -72,7 +72,7 @@ class Binary(Rule):
     action.add_command([make_bin, self.main, output] + transitive_sources)
     self.outputs = [output]
 
-class Test(Test):
+class Test(sebs.Test):
   def __init__(self, main, deps = []):
     super(Test, self).__init__()
     self.main = main

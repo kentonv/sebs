@@ -45,15 +45,14 @@ class LoaderTest(unittest.TestCase):
     self.dir.add("src/foo.sebs", 0, """
 x = 123
 _private = "hi"
-a_rule = Rule()
-nested_rule = [Rule()]
+a_rule = sebs.Rule()
+nested_rule = [sebs.Rule()]
 def func():
   return _private
 """)
     file = self.loader.load("foo.sebs")
     
-    self.assertTrue("sebs_import" not in file.__dict__)
-    self.assertTrue("Rule" not in file.__dict__)
+    self.assertTrue("sebs" not in file.__dict__)
     self.assertTrue("_private" not in file.__dict__)
     self.assertEqual(123, file.x)
     self.assertEqual("a_rule", file.a_rule.label)
@@ -65,27 +64,21 @@ def func():
     self.assertEqual("hi", file.func())
 
   def testImport(self):
-    self.dir.add("src/foo.sebs", 0, """bar = sebs_import("bar.sebs")""")
+    self.dir.add("src/foo.sebs", 0, """bar = sebs.import_("bar.sebs")""")
     self.dir.add("src/bar.sebs", 0, """x = 123""")
     file = self.loader.load("foo.sebs")
     self.assertTrue(file.bar is self.loader.load("bar.sebs"))
     self.assertEqual(123, file.bar.x)
     
   def testCycle(self):
-    self.dir.add("src/foo.sebs", 0, """sebs_import("foo.sebs")""")
+    self.dir.add("src/foo.sebs", 0, """sebs.import_("foo.sebs")""")
     self.assertRaises(DefinitionError, self.loader.load, "foo.sebs")
 
   def testOverrideBuiltins(self):
-    self.dir.add("src/foo.sebs", 0, """
-sebs_import = 123
-Rule = "foo"
-Test = "bar"
-""")
+    self.dir.add("src/foo.sebs", 0, """sebs = 123""")
     file = self.loader.load("foo.sebs")
     
-    self.assertEqual(123, file.sebs_import)
-    self.assertEqual("foo", file.Rule)
-    self.assertEqual("bar", file.Test)
+    self.assertEqual(123, file.sebs)
 
   def testLoadDirectory(self):
     self.dir.add("src/foo/bar/SEBS", 0, "x = 123")
@@ -102,9 +95,9 @@ class ContextImplTest(unittest.TestCase):
   def setUp(self):
     self.dir = VirtualDirectory()
     self.dir.add("src/foo/bar.sebs", 0, """
-mock_rule = Rule()
+mock_rule = sebs.Rule()
 return_context = mock_rule.context
-mock_test = Test()
+mock_test = sebs.Test()
 """)
 
     self.loader = Loader(self.dir)

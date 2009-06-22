@@ -91,6 +91,16 @@ class BuildFile(object):
   def __init__(self, vars):
     self.__dict__.update(vars)
 
+class _Builtins(object):
+  def __init__(self, loader):
+    self.Rule = Rule
+    self.Test = Test
+    self.Artifact = Artifact
+    self.Action = Action
+    self.DefinitionError = DefinitionError
+    self.typecheck = typecheck
+    self.import_ = loader.load
+
 class Loader(object):
   def __init__(self, root_dir):
     typecheck(root_dir, Directory)
@@ -147,16 +157,12 @@ class Loader(object):
       return existing
     
     context = _ContextImpl(self, filename)
+    builtins = _Builtins(self)
     
     def run():
       # TODO(kenton):  Remove SEBS itself from PYTHONPATH before parsing, since
       #   SEBS files should not be importing the SEBS implementation.
-      vars = {
-        "sebs_import": self.load,
-        "Rule": Rule,
-        "Test": Test,
-        "DefinitionError": DefinitionError
-      }
+      vars = { "sebs": builtins }
       self.__root_dir.execfile(context.full_filename, vars)
       return vars
 
@@ -172,12 +178,8 @@ class Loader(object):
     vars = vars.copy()
     
     # Delete "builtins", but not if the user replaced them with their own defs.
-    if vars["sebs_import"] == self.load:
-      del vars["sebs_import"]
-    if vars["Rule"] == Rule:
-      del vars["Rule"]
-    if vars["Test"] == Test:
-      del vars["Test"]
+    if "sebs" in vars and vars["sebs"] is builtins:
+      del vars["sebs"]
     
     for name, value in vars.items():
       if isinstance(value, Rule) and value.context is context:
