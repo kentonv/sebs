@@ -65,6 +65,13 @@ class Directory(object):
     variables defined by the script."""
     raise NotImplementedError
 
+  def get_disk_path(self, filename):
+    """If the file is a real, on-disk file, return its path, suitable to be
+    passed to open() or other file I/O routines.  If the file is not on disk,
+    throws an exception.  If the file does not exist, this method may throw
+    an exception or it may return an on-disk path that does not exist."""
+    raise IOError("Not a disk file: %s" % filename)
+
 class DiskDirectory(Directory):
   def __init__(self, path):
     typecheck(path, basestring)
@@ -97,6 +104,9 @@ class DiskDirectory(Directory):
     file.close()
     ast = compile(content, filename, "exec")
     exec ast in globals
+
+  def get_disk_path(self, filename):
+    return os.path.join(self.__path, filename)
 
 class VirtualDirectory(Directory):
   def __init__(self):
@@ -158,3 +168,46 @@ class VirtualDirectory(Directory):
     # to exactly match the filename parameter to this method.
     ast = compile(content, filename, "exec")
     exec ast in globals
+    
+
+class MappedDirectory(Directory):
+  """A directory which wraps some other set of directories, choosing which
+  one to use based on filename.  A Mapping object is used to map each filename
+  to some file in some other Directory, then the the same method is called on
+  that file."""
+  
+  class Mapping(object):
+    """Class which maps filenames to other locations for MappedDirectory."""
+    
+    def map(self, filename):
+      """Maps the filename to a file in some other Directory object.  Returns a
+      (directory, filename) tuple."""
+      raise NotImplementedError
+  
+  def __init__(self, mapping):
+    super(MappedDirectory, self).__init__()
+    self.__mapping = mapping
+  
+  def __do_mapping(self, method, filename, *args):
+    (directory, mapped_name) = self.__mapping.map(filename)
+    return getattr(directory, method)(mapped_name, *args)
+  
+  def exists(self, filename):
+    return self.__do_mapping("exists", filename)
+  
+  def isdir(self, filename):
+    return self.__do_mapping("isdir", filename)
+  
+  def getmtime(self, filename):
+    return self.__do_mapping("getmtime", filename)
+
+  def touch(self, filename, mtime=None):
+    return self.__do_mapping("touch", filename, mtime)
+
+  def execfile(self, filename, context):
+    # TODO(kenton):  The exec'd file will see its own name as the post-mapping
+    #   name, not the virtual name.  Do we care?
+    return self.__do_mapping("execfile", filename, context)
+
+  def get_disk_path(self, filename):
+    return self.__do_mapping("get_disk_path", filename)

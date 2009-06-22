@@ -32,6 +32,7 @@
 import collections
 import os
 import subprocess
+import sys
 
 from sebs.core import Rule, Test, Action, Artifact, ContentToken, DefinitionError
 from sebs.filesystem import Directory
@@ -87,10 +88,13 @@ class DryRunner(ActionRunner):
 class SubprocessRunner(ActionRunner):
   """An ActionRunner which actually executes the commands."""
   
-  def __init__(self):
+  def __init__(self, working_dir, stdout):
     super(SubprocessRunner, self).__init__()
     
     self.__env = os.environ.copy()
+    self.__working_dir = working_dir
+    self.__stdout = stdout
+    self.__use_color = self.__stdout.isatty()
     
     # TODO(kenton):  We should *add* src to the existing PYTHONPATH instead of
     #   overwrite, but there is one problem:  The SEBS Python archive may be
@@ -100,8 +104,11 @@ class SubprocessRunner(ActionRunner):
   
   def run(self, action):
     typecheck(action, Action)
-    # TODO(kenton):  Use colors only when outputting to a terminal.
-    print "\033[34m%s:\033[0m %s" % (action.verb, action.name)
+    if self.__use_color:
+      self.__stdout.write(
+          "\033[34m%s:\033[0m %s\n" % (action.verb, action.name))
+    else:
+      self.__stdout.write("%s: %s\n" % (action.verb, action.name))
     
     # Make sure the output directories exist.
     for output in action.outputs:
@@ -110,8 +117,9 @@ class SubprocessRunner(ActionRunner):
       # but makedirs() will raise an error if we call it.  If the path exists
       # but is *not* a directory, we still call makedirs() so that it raises an
       # appropriate error.
-      if not os.path.exists(dirname) or not os.path.isdir(dirname):
-        os.makedirs(dirname)
+      if not self.__working_dir.exists(dirname) or \
+         not self.__working_dir.isdir(dirname):
+        os.makedirs(self.__working_dir.get_disk_path(dirname))
 
     # Capture stdout if requested.
     # TODO(kenton):  Capture stdout/stderr even when not requested so that it
@@ -142,7 +150,7 @@ class SubprocessRunner(ActionRunner):
         # rebuilt on the next run.
         for output in action.outputs:
           try:
-            os.utime(output.filename, (0, 0))
+            self.__working_dir.touch(output.filename, 0)
           except Exception:
             pass
         return False
@@ -154,7 +162,7 @@ class SubprocessRunner(ActionRunner):
       if isinstance(arg, basestring):
         yield arg
       elif isinstance(arg, Artifact):
-        yield arg.filename
+        yield self.__working_dir.get_disk_path(arg.filename)
       elif isinstance(arg, ContentToken):
         file = open(arg.artifact.filename, "rU")
         content = file.read()
@@ -359,15 +367,21 @@ class Builder(object):
     if not self.build(action_runner):
       return False
     
+    if sys.stdout.isatty():
+      passmsg, failmsg = ("\033[32mPASS:\033[0m", "\033[31mFAIL:\033[0m")
+      passed, failed = ("\033[32mPASSED\033[0m", "\033[31mFAILED\033[0m")
+    else:
+      passmsg, failmsg = ("PASS:", "FAIL:")
+      passed, failed = ("PASSED", "FAILED")
+    
     while len(self.__test_queue) > 0:
       test = self.__test_queue.popleft()
       
-      # TODO(kenton):  Don't use colors if not outputting to a terminal.
       result = action_runner.run(test.test_action)
       if result:
-        print "\033[32mPASS:\033[0m", test.name
+        print passmsg, test.name
       else:
-        print "\033[31mFAIL:\033[0m", test.name
+        print failmsg, test.name
         print " ", test.test_action.stdout.filename
 
       self.__test_results.append((test.name, test, result))
@@ -379,9 +393,9 @@ class Builder(object):
     had_failure = False
     for name, test, result in self.__test_results:
       if result:
-        indicator = "\033[32mPASSED\033[0m"
+        indicator = passed
       else:
-        indicator = "\033[31mFAILED\033[0m"
+        indicator = failed
         had_failure = True
       
       print "  %-70s %s" % (name, indicator)

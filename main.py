@@ -62,12 +62,30 @@ import sys
 
 from sebs.builder import Builder, DryRunner, SubprocessRunner
 from sebs.core import Rule, Test
-from sebs.filesystem import DiskDirectory
+from sebs.filesystem import DiskDirectory, MappedDirectory
 from sebs.helpers import typecheck
 from sebs.loader import Loader, BuildFile
 
 class UsageError(Exception):
   pass
+
+class _AlternateOutputMapping(MappedDirectory.Mapping):
+  """Sometimes we want to put all build output (including intermediates) in
+  a different directory, e.g. when cross-compiling.  This class implements a
+  mapping which can be used with MappedDirectory to accomplish that."""
+
+  def __init__(self, source_dir, output_dir):
+    super(_AlternateOutputMapping, self).__init__()
+    self.__source_dir = source_dir
+    self.__output_dir = output_dir
+  
+  def map(self, filename):
+    # Note:  We intentionally consider any directory name starting with "src"
+    #   (including, e.g., "src-unofficial") as a source directory.
+    if filename.startswith("src"):
+      return (self.__source_dir, filename)
+    else:
+      return (self.__output_dir, filename)
 
 def _args_to_rules(loader, args):
   """Given a list of command-line arguments like 'foo/bar.sebs:baz', return an
@@ -95,19 +113,21 @@ def _args_to_rules(loader, args):
     else:
       yield target
 
-def build(argv):
+def build(root_dir, argv):
   try:
     opts, args = getopt.getopt(argv[1:], "", ["dry"])
   except getopt.error, message:
     raise UsageError(message)
 
-  runner = SubprocessRunner()
+  runner = None
   
   for name, value in opts:
     if name == "--dry":
       runner = DryRunner(sys.stdout)
+
+  if runner is None:
+    runner = SubprocessRunner(root_dir, sys.stdout)
   
-  root_dir = DiskDirectory(".")
   loader = Loader(root_dir)
   builder = Builder(root_dir)
   
@@ -126,33 +146,38 @@ def build(argv):
   else:
     return 1
 
-def clean(argv):
+def clean(root_dir, argv):
   if len(argv) > 1:
     raise UsageError("clean currently accepts no arguments.")
   
   print "Deleting all output directories..."
   for dir in ["tmp", "bin", "lib", "share"]:
-    if os.path.exists(dir):
-      shutil.rmtree(dir)
+    if root_dir.exists(dir):
+      shutil.rmtree(root_dir.get_disk_path(dir))
 
 def main(argv):
   try:
-    opts, args = getopt.getopt(argv[1:], "h", ["help"])
+    opts, args = getopt.getopt(argv[1:], "h", ["help", "output="])
   except getopt.error, message:
     raise UsageError(message)
+  
+  root_dir = DiskDirectory(".")
   
   for name, value in opts:
     if name in ("-h", "--help"):
       print __doc__
       return 0
+    elif name == "--output":
+      root_dir = MappedDirectory(
+          _AlternateOutputMapping(root_dir, DiskDirectory(value)))
   
   if len(args) == 0:
     raise UsageError("Missing command.")
   
   if args[0] in ("build", "test"):
-    return build(args)
+    return build(root_dir, args)
   elif args[0] == "clean":
-    return clean(args)
+    return clean(root_dir, args)
   else:
     raise UsageError("Unknown command: %s" % args[0])
 

@@ -36,11 +36,13 @@ import tempfile
 import time
 import unittest
 
-from sebs.filesystem import Directory, DiskDirectory, VirtualDirectory
+from sebs.filesystem import Directory, DiskDirectory, VirtualDirectory, \
+                            MappedDirectory
 
-class DirectoryTest(unittest.TestCase):
+class DirectoryTest(object):
   """Base class for DiskDirectoryTest and VirtualDirectoryTest.  Defines test
-  cases that apply to both.
+  cases that apply to both.  Does not subclass unittest.TestCase because we
+  do not want the test loader to try to instantiate this class automatically.
   
   The subclass must define a member called "dir" which is the directory being
   tested.  It must also implement addFile()."""
@@ -101,9 +103,11 @@ class DirectoryTest(unittest.TestCase):
     self.assertTrue("y" in vars)
     self.assertEqual("foo", vars["y"])
     self.assertTrue("filename" in vars)
-    self.assertEqual("foo", vars["filename"])
+    # See TODO in MappedDirectory.execfile().
+    if not isinstance(self.dir, MappedDirectory):
+      self.assertEqual("foo", vars["filename"])
 
-class DiskDirectoryTest(DirectoryTest):
+class DiskDirectoryTest(DirectoryTest, unittest.TestCase):
   def setUp(self):
     self.tempdir = tempfile.mkdtemp()
     self.dir = DiskDirectory(self.tempdir)
@@ -123,7 +127,11 @@ class DiskDirectoryTest(DirectoryTest):
   def addDirectory(self, name):
     os.makedirs(os.path.join(self.tempdir, name))
 
-class VirtualDirectoryTest(DirectoryTest):
+  def testGetDiskPath(self):
+    self.assertEquals(os.path.join(self.tempdir, "foo/bar"),
+                      self.dir.get_disk_path("foo/bar"))
+
+class VirtualDirectoryTest(DirectoryTest, unittest.TestCase):
   def setUp(self):
     self.dir = VirtualDirectory()
     super(VirtualDirectoryTest, self).setUp()
@@ -134,15 +142,33 @@ class VirtualDirectoryTest(DirectoryTest):
   def addDirectory(self, name):
     self.dir.add_directory(name)
 
-# TODO(kenton):  There has got to be a better way to convince the testing
-#   framework to skip over DirectoryTest.
-class NoAbstractTestLoader(unittest.TestLoader):
-  def loadTestsFromTestCase(self, testCaseClass):
-    if testCaseClass is DirectoryTest:
-      return unittest.TestSuite()
-    else:
-      return super(NoAbstractTestLoader, self) \
-        .loadTestsFromTestCase(testCaseClass)
+  def testGetDiskPath(self):
+    self.assertRaises(IOError, self.dir.get_disk_path, "foo/bar")
+
+class MappedDirectoryTest(DirectoryTest, unittest.TestCase):
+  class MappingImpl(MappedDirectory.Mapping):
+    def __init__(self, prefix, real_dir):
+      super(MappedDirectoryTest.MappingImpl, self).__init__()
+      self.__prefix = prefix
+      self.__real_dir = real_dir
+    
+    def map(self, filename):
+      return (self.__real_dir, os.path.join(self.__prefix, filename))
+  
+  def setUp(self):
+    self.virtual_dir = VirtualDirectory()
+    self.dir = MappedDirectory(
+        MappedDirectoryTest.MappingImpl("mapped_prefix", self.virtual_dir))
+    super(MappedDirectoryTest, self).setUp()
+
+  def addFile(self, name, mtime, content):
+    self.virtual_dir.add(os.path.join("mapped_prefix", name), mtime, content)
+
+  def addDirectory(self, name):
+    self.virtual_dir.add_directory(os.path.join("mapped_prefix", name))
+
+  def testGetDiskPath(self):
+    self.assertRaises(IOError, self.dir.get_disk_path, "foo/bar")
 
 if __name__ == "__main__":
-  unittest.main(testLoader = NoAbstractTestLoader())
+  unittest.main()

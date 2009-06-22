@@ -31,8 +31,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 export PYTHONPATH=src
-SEBS='python -m sebs.main'
-
 set -e
 
 function expect_contains() {
@@ -44,7 +42,7 @@ function expect_contains() {
 
 function expect_success() {
   if ! eval $1; then
-    echo "Command was expected to fail: $1" >&2
+    echo "Command was expected to succeed: $1" >&2
     exit 1
   fi
 }
@@ -56,15 +54,21 @@ function expect_failure() {
   fi
 }
 
-# TODO(kenton):  Use a separate directory for output.
+OUTPUT=tmp/sebs/cpp_test/output
+WORKING=tmp/sebs/cpp_test/build
+mkdir -p $WORKING
+SEBS='python -m sebs.main --output=$WORKING'
+
 echo "Cleaning..."
 
-rm -rf tmp/sebs/cpp_test/*.o tmp/sebs/cpp_test/*.a bin/sebs_cpp_test
-mkdir -p tmp/sebs/cpp_test
+expect_success "$SEBS clean"
+
+# Verify clean actually worked.
+expect_failure "test -e $WORKING/tmp"
+expect_failure "test -e $WORKING/bin"
+expect_failure "test -e $WORKING/lib"
 
 echo "Building test binary..."
-
-OUTPUT=tmp/sebs/cpp_test/output
 
 expect_success "$SEBS build sebs/cpp_test/cpp_test.sebs:prog &> $OUTPUT"
 
@@ -77,7 +81,7 @@ expect_contains $OUTPUT '^link: sebs/cpp_test/cpp_test.sebs:prog$'
 
 echo "Running test binary..."
 
-expect_success './bin/sebs_cpp_test &> $OUTPUT'
+expect_success '$WORKING/bin/sebs_cpp_test &> $OUTPUT'
 
 expect_contains $OUTPUT '^FooFunction(foo) BarFunction(bar) FooFunction(bar) $'
 
@@ -85,9 +89,7 @@ echo "Running passing test..."
 
 expect_success "$SEBS test sebs/cpp_test/cpp_test.sebs:passing_test &> $OUTPUT"
 
-# TODO(kenton):  When SEBS is fixed to only use color when outputting to a
-#   terminal, we can make these matches more precise.  (Below, too.)
-expect_contains $OUTPUT 'PASS:.* sebs/cpp_test/cpp_test.sebs:passing_test$'
+expect_contains $OUTPUT '^PASS: sebs/cpp_test/cpp_test.sebs:passing_test$'
 
 expect_contains tmp/sebs/cpp_test/passing_test_output.txt \
   '^BarFunction(test) FooFunction(test) $'
@@ -96,7 +98,7 @@ echo "Running failing test..."
 
 expect_failure "$SEBS test sebs/cpp_test/cpp_test.sebs:failing_test &> $OUTPUT"
 
-expect_contains $OUTPUT 'FAIL:.* sebs/cpp_test/cpp_test.sebs:failing_test$'
+expect_contains $OUTPUT '^FAIL: sebs/cpp_test/cpp_test.sebs:failing_test$'
 
 expect_contains tmp/sebs/cpp_test/failing_test_output.txt \
   '^FooFunction(fail) $'
