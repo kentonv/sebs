@@ -100,7 +100,8 @@ class SubprocessRunner(ActionRunner):
   
   def run(self, action):
     typecheck(action, Action)
-    print "%s: %s" % (action.verb, action.name)
+    # TODO(kenton):  Use colors only when outputting to a terminal.
+    print "\033[34m%s:\033[0m %s" % (action.verb, action.name)
     
     # Make sure the output directories exist.
     for output in action.outputs:
@@ -364,9 +365,9 @@ class Builder(object):
       # TODO(kenton):  Don't use colors if not outputting to a terminal.
       result = action_runner.run(test.test_action)
       if result:
-        print "\033[1;32mPASS:\033[1;m", test.name
+        print "\033[32mPASS:\033[0m", test.name
       else:
-        print "\033[1;31mFAIL:\033[1;m", test.name
+        print "\033[31mFAIL:\033[0m", test.name
         print " ", test.test_action.stdout.filename
 
       self.__test_results.append((test.name, test, result))
@@ -378,9 +379,9 @@ class Builder(object):
     had_failure = False
     for name, test, result in self.__test_results:
       if result:
-        indicator = "\033[1;32mPASSED\033[1;m"
+        indicator = "\033[32mPASSED\033[0m"
       else:
-        indicator = "\033[1;31mFAILED\033[1;m"
+        indicator = "\033[31mFAILED\033[0m"
         had_failure = True
       
       print "  %-70s %s" % (name, indicator)
