@@ -1,5 +1,5 @@
 #! /usr/bin/python
-# Scalable Extensible Build System
+# Scalable Extendable Build System
 # Copyright (c) 2009 Kenton Varda.  All rights reserved.
 # http://code.google.com/p/sebs
 #
