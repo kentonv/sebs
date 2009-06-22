@@ -1,6 +1,7 @@
 #! /bin/bash
 # Scalable Extendable Build System
-# Copyright (c) 2009 Kenton Varda.  All rights reserved.
+# Copyright (c) 2009 Kenton Varda and contributors.  All rights reserved.
+# Portions copyright Google, Inc.
 # http://code.google.com/p/sebs
 #
 # Redistribution and use in source and binary forms, with or without
