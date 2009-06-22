@@ -56,6 +56,8 @@
 # Background server that accepts commands and doesn't have to reload sebs files.
 
 import getopt
+import os
+import shutil
 import sys
 
 from sebs.builder import Builder, DryRunner, SubprocessRunner
@@ -75,7 +77,13 @@ def _args_to_rules(loader, args):
   
   for arg in args:
     if arg.startswith("src/") or arg.startswith("src\\"):
+      # For ease of use, we allow files to start with "src/", so tab completion
+      # can be used.
       arg = arg[4:]
+    elif arg.startswith("//"):
+      # We also allow files to start with "//" which mimics to the syntax given
+      # to sebs.import_.
+      arg = arg[2:]
     target = loader.load(arg)
     
     if isinstance(target, BuildFile):
@@ -118,6 +126,15 @@ def build(argv):
   else:
     return 1
 
+def clean(argv):
+  if len(argv) > 1:
+    raise UsageError("clean currently accepts no arguments.")
+  
+  print "Deleting all output directories..."
+  for dir in ["tmp", "bin", "lib", "share"]:
+    if os.path.exists(dir):
+      shutil.rmtree(dir)
+
 def main(argv):
   try:
     opts, args = getopt.getopt(argv[1:], "h", ["help"])
@@ -134,6 +151,8 @@ def main(argv):
   
   if args[0] in ("build", "test"):
     return build(args)
+  elif args[0] == "clean":
+    return clean(args)
   else:
     raise UsageError("Unknown command: %s" % args[0])
 

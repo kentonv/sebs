@@ -92,14 +92,27 @@ class BuildFile(object):
     self.__dict__.update(vars)
 
 class _Builtins(object):
-  def __init__(self, loader):
+  def __init__(self, loader, filename):
     self.Rule = Rule
     self.Test = Test
     self.Artifact = Artifact
     self.Action = Action
     self.DefinitionError = DefinitionError
     self.typecheck = typecheck
-    self.import_ = loader.load
+    self.__loader = loader
+    parts = filename.rsplit("/", 1)
+    if len(parts) == 1:
+      self.__prefix = ""
+    else:
+      self.__prefix = parts[0] + "/"
+  
+  def import_(self, name):
+    # Absolute imports start with "//".
+    if name.startswith("//"):
+      name = name[2:]
+    else:
+      name = self.__prefix + name
+    return self.__loader.load(name)
 
 class Loader(object):
   def __init__(self, root_dir):
@@ -157,7 +170,7 @@ class Loader(object):
       return existing
     
     context = _ContextImpl(self, filename)
-    builtins = _Builtins(self)
+    builtins = _Builtins(self, filename)
     
     def run():
       # TODO(kenton):  Remove SEBS itself from PYTHONPATH before parsing, since

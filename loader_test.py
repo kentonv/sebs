@@ -74,6 +74,22 @@ def func():
     self.dir.add("src/foo.sebs", 0, """sebs.import_("foo.sebs")""")
     self.assertRaises(DefinitionError, self.loader.load, "foo.sebs")
 
+  def testAbsoluteImport(self):
+    self.dir.add("src/foo/foo.sebs", 0, """
+bar1 = sebs.import_("bar.sebs")
+bar2 = sebs.import_("//foo/bar.sebs")
+bar3 = sebs.import_("//bar/bar.sebs")
+""")
+    self.dir.add("src/foo/bar.sebs", 0, """x = 123""")
+    self.dir.add("src/bar/bar.sebs", 0, """x = 321""")
+    file = self.loader.load("foo/foo.sebs")
+    self.assertTrue(file.bar1 is self.loader.load("foo/bar.sebs"))
+    self.assertTrue(file.bar2 is self.loader.load("foo/bar.sebs"))
+    self.assertTrue(file.bar3 is self.loader.load("bar/bar.sebs"))
+    self.assertEqual(123, file.bar1.x)
+    self.assertEqual(123, file.bar2.x)
+    self.assertEqual(321, file.bar3.x)
+
   def testOverrideBuiltins(self):
     self.dir.add("src/foo.sebs", 0, """sebs = 123""")
     file = self.loader.load("foo.sebs")
