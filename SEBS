@@ -61,7 +61,7 @@ class ShellTest(_sebs.Test):
   def __init__(self, src):
     super(ShellTest, self).__init__()
     self.src = src
-  
+
   def _expand(self):
     main_artifact = self.context.source_artifact(self.src)
     action = self.context.action(self, [main_artifact],

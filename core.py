@@ -65,10 +65,10 @@ class DefinitionError(Exception):
 class Artifact(object):
   """Represents a file involved in the build process.  May be a source file
   or a generated file.
-  
+
   Do not construct Artifacts directly.  Use the methods of Context
   (accessible as self.context in the body of any Rule) to create artifacts.
-  
+
   Attributes:
     filename      Name of the file relative to the top of the project.
     action        The Action which creates this file, or None if this is not
@@ -77,15 +77,15 @@ class Artifact(object):
     dependents    List of actions for which this Artifact is an input.  Actions
                   are automatically added to the list when they are
                   constructed."""
-               
+
   def __init__(self, filename, action):
     typecheck(filename, basestring)
     typecheck(action, Action)
-    
+
     self.filename = filename
     self.action = action
     self.dependents = []  # Filled in by Action.__init__().
-    
+
     if action is not None:
       action.outputs.append(self)
 
@@ -102,10 +102,10 @@ class Artifact(object):
 class ContentToken(object):
   """A placeholder for the contents of a file.  See Artifact.contents() and
   Action.add_command().
-  
+
   Attributes:
     artifact   The Artifact for which this represents the contents."""
-  
+
   def __init__(self, artifact):
     typecheck(artifact, Artifact)
     self.artifact = artifact
@@ -113,7 +113,7 @@ class ContentToken(object):
 class Action(object):
   """Represents a step in the build process, which has some inputs and some
   outputs.
-  
+
   Attributes:
     inputs     List of Artifacts representing input files for this action.
     outputs    List of Artifacts which are created by this Action.  Artifacts
@@ -142,7 +142,7 @@ class Action(object):
     typecheck(inputs, list, Artifact)
     typecheck(verb, basestring)
     typecheck(name, basestring)
-    
+
     self.rule = rule
     self.inputs = inputs
     self.outputs = []  # Filled in by Artifact.__init__()
@@ -153,7 +153,7 @@ class Action(object):
     self.merge_standard_outs = False
     self.pass_message = None
     self.fail_mesasge = None
-    
+
     for input in inputs:
       input.dependents.append(self)
 
@@ -164,13 +164,13 @@ class Action(object):
       return self.__name
 
   name = property(__get_name)
-  
+
   def add_command(self, command):
     """Add a command to the Action.  The command is a list of arguments like
     you'd pass to the POSIX exec() function -- the first argument is an
     executable name and the arguments make up the process's argv list.  Each
     argument in the list can be one of the following:
-    
+
       string        A literal string.  Will be passed verbatim.
       Artifact      Will be replaced by the Artifact's filename.  The Artifact
                     must be one of those listed in self.inputs or self.outputs.
@@ -184,9 +184,9 @@ class Action(object):
                     that they will be joined with no delimiter between them.
                     ContentTokens in the list will be replaced by the verbatim
                     content *including* whitespace -- no splitting is done."""
-    
+
     typecheck(command, list)
-    
+
     def check_element_types(args):
       for arg in args:
         if isinstance(arg, list):
@@ -202,11 +202,11 @@ class Action(object):
               arg.artifact)
         elif not isinstance(arg, basestring):
           raise TypeError("Argument is not one of the allowed types: %s" % arg)
-    
+
     check_element_types(command)
-    
+
     self.commands.append(command)
-  
+
   def capture_stdout(self, artifact, include_stderr=False):
     """Indicates that the standard output of this action should be written to
     the given Artifact.  The Artifact must be a derived artifact with this
@@ -215,7 +215,7 @@ class Action(object):
 
     typecheck(artifact, Artifact)
     typecheck(include_stderr, bool)
-    
+
     if self.stdout is not None:
       raise DefinitionError("Standard output is already being captured.")
 
@@ -223,7 +223,7 @@ class Action(object):
       raise DefinitionError(
         "Artifact passed to capture_stdout() must have this Action as its "
         "creating Action.")
-    
+
     self.stdout = artifact
     self.merge_standard_outs = include_stderr
 
@@ -233,9 +233,9 @@ class Context(object):
   If this Context is not explicitly passed to the Rule's constructor, then the
   "current context" at the time when the Rule was constructed is used.  This
   context corresponds to the SEBS file which is currently being loaded.
-  
+
   The Context is also used to construct Actions and Artifacts.
-  
+
   Attributes:
     filename       The name of the SEBS file that this context is associated
                    with, relative to the top of the source tree (the "src"
@@ -243,65 +243,65 @@ class Context(object):
     full_filename  Like filename, but includes the full path of the file
                    (either absolute or relative to the directory where SEBS
                    was invoked).  Useful for error messages."""
-  
+
   __current_context = None
 
   def run(self, function):
     """Set the context as the current context and then run the given
     function.  After the function completes, the current context is reverted
     to the previous current context before run() returns."""
-    
+
     old_context = Context.__current_context
     Context.__current_context = self
     try:
       return function()
     finally:
       Context.__current_context = old_context
-  
+
   @staticmethod
   def current():
     """Get the current context."""
-    
+
     return Context.__current_context
 
   def source_artifact(self, filename):
     """Returns an Artifact representing a source file.  The filename must be
     given relative to the directory containing the SEBS file.  If called
     multiple times with the same file, the same Artifact object is returned."""
-    
+
     raise NotImplementedError
-    
+
   def intermediate_artifact(self, filename, action):
     """Returns an Artifact representing an intermediate artifact which will be
     generated at build time by the given action and placed in the tmp
     directory.
-    
+
     Parameters:
       filename    The name of the generated file, relative to the SEBS file's
                   tmp directory (which is derived by taking the source directory
                   and replacing 'src' with 'tmp').
       action      The action which generates this artifact."""
-    
+
     raise NotImplementedError
-  
+
   def output_artifact(self, directory, filename, action):
     """Returns an Artifact representing an output artifact which is suitable
     for installation.
-    
+
     Parameters:
       directory    Indicates the top-level output directory where this artifact
                    will be written, e.g. 'bin' or 'lib'.
       filename     The output file name relative to the output directory.
       action       The action which generates this output."""
-    
+
     raise NotImplementedError
-  
+
   def action(self, *vargs, **kwargs):
     """Returns a new Action.  The caller should call the result's add_command()
     method to add commands which implement the action.  The parameters
     correspond to the parameters to the Action constructor, although you should
     not call the Action constructor directly."""
-    
+
     raise NotImplementedError
 
 class Rule(object):
@@ -309,7 +309,7 @@ class Rule(object):
   a list of rules, where each rule expands to a set of actions.  So, a rule
   might define a C++ library, and consists of several actions which compile
   each source file into an object file and link them together.
-  
+
   Attributes:
     context The Context in which the Rule was created.
     line    The line number where the rule was defined.
@@ -322,18 +322,18 @@ class Rule(object):
 
   def __init__(self, context=None):
     typecheck(context, Context)
-    
+
     if context is None:
       context = Context.current()
       if context is None:
         raise AssertionError(
           "Cannot create a Rule when not parsing a SEBS file.")
-    
+
     self.context = context
     self.line = -1
     self.label = None
     self.__expanded = False
-    
+
     for file, line, function, text in traceback.extract_stack():
       if file == context.full_filename:
         self.line = line
@@ -351,12 +351,12 @@ class Rule(object):
       return "%s:%s" % (sebsfile, self.label)
 
   name = property(__get_name)
-  
+
   def _expand(self):
     """Expand the Rule to build its Action graph.  This is called the first
     time expand_once() is called.  Subclasses should override this."""
     raise NotImplementedError
-  
+
   def expand_once(self):
     """Called to build the Rule's action graph.  The first time this is called,
     self._expand() will be called; subsequent calls have no effect.  Subclasses
@@ -364,7 +364,7 @@ class Rule(object):
     called, placing a list of the final outputs in self.outputs.  During
     _expand(), a Rule must call expand_once() on each of its direct
     dependencies."""
-    
+
     # TODO(kenton):  Detect recursion?
     if not self.__expanded:
       self._expand()
@@ -372,7 +372,7 @@ class Rule(object):
 
 class Test(Rule):
   """A special kind of Rule that represents a test.
-  
+
   Attributes (in addition to Rule's attributes):
     test_action  An action which, when executed, runs the test.  The command
                  should exit normally if the test passes or with an error code

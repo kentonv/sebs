@@ -40,10 +40,10 @@ from sebs.helpers import typecheck
 
 class ActionRunner(object):
   """Abstract interface for an object which can execute actions."""
-  
+
   def __init__(self):
     pass
-  
+
   def run(self, action):
     """Executes the given action.  Returns true if the command succeeds, false
     if it fails."""
@@ -51,11 +51,11 @@ class ActionRunner(object):
 
 class DryRunner(ActionRunner):
   """An ActionRunner which simply prints each command that would be run."""
-  
+
   def __init__(self, output):
     super(DryRunner, self).__init__()
     self.__output = output
-  
+
   def run(self, action):
     typecheck(action, Action)
 
@@ -71,7 +71,7 @@ class DryRunner(ActionRunner):
       print " ", " ".join(formatted + suffix)
 
     return True
-  
+
   def __format_command(self, command):
     for arg in command:
       if isinstance(arg, basestring):
@@ -87,21 +87,21 @@ class DryRunner(ActionRunner):
 
 class SubprocessRunner(ActionRunner):
   """An ActionRunner which actually executes the commands."""
-  
+
   def __init__(self, working_dir, stdout):
     super(SubprocessRunner, self).__init__()
-    
+
     self.__env = os.environ.copy()
     self.__working_dir = working_dir
     self.__stdout = stdout
     self.__use_color = self.__stdout.isatty()
-    
+
     # TODO(kenton):  We should *add* src to the existing PYTHONPATH instead of
     #   overwrite, but there is one problem:  The SEBS Python archive may be
     #   in PYTHONPATH, and we do NOT want programs that we run to be able to
     #   take advantage of that to import SEBS implementation modules.
     self.__env["PYTHONPATH"] = "src"
-  
+
   def run(self, action):
     typecheck(action, Action)
     if self.__use_color:
@@ -109,7 +109,7 @@ class SubprocessRunner(ActionRunner):
           "\033[34m%s:\033[0m %s\n" % (action.verb, action.name))
     else:
       self.__stdout.write("%s: %s\n" % (action.verb, action.name))
-    
+
     # Make sure the output directories exist.
     for output in action.outputs:
       dirname = os.path.dirname(output.filename)
@@ -186,9 +186,9 @@ class _ArtifactState(object):
     typecheck(artifact, Artifact)
     typecheck(root_dir, Directory)
     typecheck(state_map, _StateMap)
-    
+
     self.artifact = artifact
-    
+
     try:
       self.timestamp = root_dir.getmtime(artifact.filename)
     except os.error:
@@ -218,14 +218,14 @@ class _ActionState(object):
     typecheck(action, Action)
     typecheck(root_dir, Directory)
     typecheck(state_map, _StateMap)
-    
+
     self.action = action
-    
+
     # Has the Builder decided that this action needs to be built?
     self.is_pending = False
     # Is this action ready to be built now?  (I.e. inputs are not dirty.)
     self.is_ready = False
-    
+
     self.update_readiness(state_map)
 
   def update_readiness(self, state_map):
@@ -233,13 +233,13 @@ class _ActionState(object):
     is set true, otherwise it is set false.  This method returns true if
     is_ready was modified (from false to true), or false if it kept its previous
     value."""
-    
+
     typecheck(state_map, _StateMap)
-    
+
     if self.is_ready:
       # Already ready.  No change is possible.
       return False
-      
+
     for input in self.action.inputs:
       if state_map.artifact_state(input).is_dirty:
         return False
@@ -250,24 +250,24 @@ class _ActionState(object):
 class _StateMap(object):
   def __init__(self, root_dir):
     typecheck(root_dir, Directory)
-    
+
     self.__artifacts = {}
     self.__actions = {}
     self.__root_dir = root_dir
-  
+
   def artifact_state(self, artifact):
     typecheck(artifact, Artifact)
-    
+
     if artifact in self.__artifacts:
       return self.__artifacts[artifact]
     else:
       result = _ArtifactState(artifact, self.__root_dir, self)
       self.__artifacts[artifact] = result
       return result
-  
+
   def action_state(self, action):
     typecheck(action, Action)
-    
+
     if action in self.__actions:
       return self.__actions[action]
     else:
@@ -278,7 +278,7 @@ class _StateMap(object):
 class Builder(object):
   def __init__(self, root_dir):
     typecheck(root_dir, Directory)
-    
+
     self.__state_map = _StateMap(root_dir)
 
     # Actions which are ready but haven't been started.
@@ -286,20 +286,20 @@ class Builder(object):
 
     self.__test_queue = collections.deque()
     self.__test_results = []
-    
+
   def add_artifact(self, artifact):
     typecheck(artifact, Artifact)
-    
+
     artifact_state = self.__state_map.artifact_state(artifact)
     if not artifact_state.is_dirty:
       return   # Source file; nothing to do.
-    
+
     # The artifact is dirty, therefore it must have an action.
     action = artifact.action
     action_state = self.__state_map.action_state(action)
     if action_state.is_pending:
       return   # Action is already pending.
-    
+
     action_state.is_pending = True
     if action_state.is_ready:
       self.__action_queue.append(artifact.action)
@@ -309,12 +309,12 @@ class Builder(object):
 
   def add_rule(self, rule):
     typecheck(rule, Rule)
-    
+
     rule.expand_once()
 
     for artifact in rule.outputs:
       self.add_artifact(artifact)
-  
+
   def add_test(self, test):
     typecheck(test, Test)
 
@@ -326,32 +326,32 @@ class Builder(object):
 
     for input in test.test_action.inputs:
       self.add_artifact(input)
-    
+
     if self.__state_map.artifact_state(test.test_action.stdout).is_dirty:
       self.__test_queue.append(test)
     else:
       self.__test_results.append((test.name, test, True))
-  
+
   def build(self, action_runner):
     typecheck(action_runner, ActionRunner)
-    
+
     while len(self.__action_queue) > 0:
       action = self.__action_queue.popleft()
       if not action_runner.run(action):
         print "BUILD FAILED"
         return False
-      
+
       newly_ready = []
-      
+
       for output in action.outputs:
         self.__state_map.artifact_state(output).is_dirty = False
-        
+
         for dependent in output.dependents:
           dependent_state = self.__state_map.action_state(dependent)
           if dependent_state.is_pending and \
              dependent_state.update_readiness(self.__state_map):
             newly_ready.append(dependent)
-      
+
       # Stick newly-ready stuff at the beginning of the queue so that local
       # work tends to be grouped together.  For example, if we're building
       # C++ libraries A and B, we'd like to compile the sources of A, then
@@ -360,23 +360,23 @@ class Builder(object):
       # sources of both libraries before linking either one.
       newly_ready.reverse()
       self.__action_queue.extendleft(newly_ready)
-    
+
     return True
 
   def test(self, action_runner):
     if not self.build(action_runner):
       return False
-    
+
     if sys.stdout.isatty():
       passmsg, failmsg = ("\033[32mPASS:\033[0m", "\033[31mFAIL:\033[0m")
       passed, failed = ("\033[32mPASSED\033[0m", "\033[31mFAILED\033[0m")
     else:
       passmsg, failmsg = ("PASS:", "FAIL:")
       passed, failed = ("PASSED", "FAILED")
-    
+
     while len(self.__test_queue) > 0:
       test = self.__test_queue.popleft()
-      
+
       result = action_runner.run(test.test_action)
       if result:
         print passmsg, test.name
@@ -387,9 +387,9 @@ class Builder(object):
       self.__test_results.append((test.name, test, result))
 
     self.__test_results.sort()
-    
+
     print "\nTest results:"
-    
+
     had_failure = False
     for name, test, result in self.__test_results:
       if result:
@@ -397,10 +397,10 @@ class Builder(object):
       else:
         indicator = failed
         had_failure = True
-      
+
       print "  %-70s %s" % (name, indicator)
-      
+
       if not result:
         print "   ", test.test_action.stdout.filename
-    
+
     return not had_failure

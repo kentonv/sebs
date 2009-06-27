@@ -37,7 +37,7 @@ class Library(sebs.Rule):
   def __init__(self, srcs):
     super(Library, self).__init__()
     self.srcs = srcs
-  
+
   def _expand(self):
     self.src_artifacts = []
     for src in self.srcs:
@@ -53,7 +53,7 @@ class Binary(sebs.Rule):
     self.main = main
     self.srcs = srcs
     self.deps = deps
-    
+
   def _expand(self):
     self.src_artifacts = []
     for src in self.srcs:
@@ -65,7 +65,7 @@ class Binary(sebs.Rule):
         raise DefinitionError("Dependency is not a Python library: %s" % dep)
       dep.expand_once()
       transitive_sources.extend(dep.src_artifacts)
-    
+
     make_bin = self.context.source_artifact("make_py_binary.py")
     action = self.context.action(self, [make_bin] + transitive_sources, "par")
     output = self.context.output_artifact("bin", self.binary_name, action)

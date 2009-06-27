@@ -37,7 +37,7 @@ class _Base(sebs.Rule):
     super(_Base, self).__init__()
     self.srcs = srcs
     self.deps = deps
-    
+
   def _expand(self):
     cflags = ["c++", "-Isrc"]
 
@@ -81,7 +81,7 @@ class Library(_Base):
 
   def _expand(self):
     super(Library, self)._expand()
-        
+
     static_link_action = self.context.action(self, self.objects, "link")
 
     if self.output_name is None:
@@ -97,10 +97,10 @@ class Library(_Base):
     # same set of sources.  It appears the "ar" command does not have any
     # option for "remove any files that aren't in the list".
     static_link_action.add_command(["rm", "-f", static_lib])
-    
+
     # Create the library archive, with a symbol table.
     static_link_action.add_command(["ar", "-qcs", static_lib] + self.objects)
-    
+
     self.static_library = static_lib
     self.outputs = [static_lib]
 
@@ -124,7 +124,7 @@ class Binary(_Base):
           "bin", self.output_name, link_action)
 
     link_action.add_command(["c++", "-o", output] + all_inputs)
-    
+
     self.binary = output
     self.outputs = [output]
 
@@ -142,6 +142,6 @@ class Test(sebs.Test):
         "%s_output.txt" % self.__binary_rule.anonymous_name(), action)
     action.add_command([self.__binary_rule.binary])
     action.capture_stdout(output, include_stderr=True)
-    
+
     self.test_action = action
     self.outputs = []

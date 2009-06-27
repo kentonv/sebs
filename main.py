@@ -78,7 +78,7 @@ class _AlternateOutputMapping(MappedDirectory.Mapping):
     super(_AlternateOutputMapping, self).__init__()
     self.__source_dir = source_dir
     self.__output_dir = output_dir
-  
+
   def map(self, filename):
     # Note:  We intentionally consider any directory name starting with "src"
     #   (including, e.g., "src-unofficial") as a source directory.
@@ -90,9 +90,9 @@ class _AlternateOutputMapping(MappedDirectory.Mapping):
 def _args_to_rules(loader, args):
   """Given a list of command-line arguments like 'foo/bar.sebs:baz', return an
   iterator of rules which should be built."""
-  
+
   typecheck(args, list, basestring)
-  
+
   for arg in args:
     if arg.startswith("src/") or arg.startswith("src\\"):
       # For ease of use, we allow files to start with "src/", so tab completion
@@ -103,7 +103,7 @@ def _args_to_rules(loader, args):
       # to sebs.import_.
       arg = arg[2:]
     target = loader.load(arg)
-    
+
     if isinstance(target, BuildFile):
       for name, value in target.__dict__.items():
         if isinstance(value, Rule):
@@ -120,17 +120,17 @@ def build(root_dir, argv):
     raise UsageError(message)
 
   runner = None
-  
+
   for name, value in opts:
     if name == "--dry":
       runner = DryRunner(sys.stdout)
 
   if runner is None:
     runner = SubprocessRunner(root_dir, sys.stdout)
-  
+
   loader = Loader(root_dir)
   builder = Builder(root_dir)
-  
+
   if argv[0] == "test":
     for rule in list(_args_to_rules(loader, args)):
       if isinstance(rule, Test):
@@ -149,7 +149,7 @@ def build(root_dir, argv):
 def clean(root_dir, argv):
   if len(argv) > 1:
     raise UsageError("clean currently accepts no arguments.")
-  
+
   print "Deleting all output directories..."
   for dir in ["tmp", "bin", "lib", "share"]:
     if root_dir.exists(dir):
@@ -160,9 +160,9 @@ def main(argv):
     opts, args = getopt.getopt(argv[1:], "h", ["help", "output="])
   except getopt.error, message:
     raise UsageError(message)
-  
+
   root_dir = DiskDirectory(".")
-  
+
   for name, value in opts:
     if name in ("-h", "--help"):
       print __doc__
@@ -170,10 +170,10 @@ def main(argv):
     elif name == "--output":
       root_dir = MappedDirectory(
           _AlternateOutputMapping(root_dir, DiskDirectory(value)))
-  
+
   if len(args) == 0:
     raise UsageError("Missing command.")
-  
+
   if args[0] in ("build", "test"):
     return build(root_dir, args)
   elif args[0] == "clean":

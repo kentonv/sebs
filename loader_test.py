@@ -40,7 +40,7 @@ class LoaderTest(unittest.TestCase):
   def setUp(self):
     self.dir = VirtualDirectory()
     self.loader = Loader(self.dir)
-    
+
   def testBasics(self):
     self.dir.add("src/foo.sebs", 0, """
 x = 123
@@ -51,7 +51,7 @@ def func():
   return _private
 """)
     file = self.loader.load("foo.sebs")
-    
+
     self.assertTrue("sebs" not in file.__dict__)
     self.assertTrue("_private" not in file.__dict__)
     self.assertEqual(123, file.x)
@@ -69,7 +69,7 @@ def func():
     file = self.loader.load("foo.sebs")
     self.assertTrue(file.bar is self.loader.load("bar.sebs"))
     self.assertEqual(123, file.bar.x)
-    
+
   def testCycle(self):
     self.dir.add("src/foo.sebs", 0, """sebs.import_("foo.sebs")""")
     self.assertRaises(DefinitionError, self.loader.load, "foo.sebs")
@@ -93,7 +93,7 @@ bar3 = sebs.import_("//bar/bar.sebs")
   def testOverrideBuiltins(self):
     self.dir.add("src/foo.sebs", 0, """sebs = 123""")
     file = self.loader.load("foo.sebs")
-    
+
     self.assertEqual(123, file.sebs)
 
   def testLoadDirectory(self):
@@ -135,11 +135,11 @@ mock_test = sebs.Test()
     self.loader = Loader(self.dir)
     self.file = self.loader.load("foo/bar.sebs")
     self.context = self.file.return_context
-    
+
   def testBasics(self):
     self.assertEqual("foo/bar.sebs", self.context.filename)
     self.assertEqual("src/foo/bar.sebs", self.context.full_filename)
-    
+
   def testRules(self):
     self.assertTrue(isinstance(self.file.mock_rule, Rule))
     self.assertTrue(isinstance(self.file.mock_test, Test))
@@ -152,7 +152,7 @@ mock_test = sebs.Test()
     self.assertEqual("src/foo/qux", artifact1.filename)
     self.assertTrue(artifact1.action is None)
     self.assertFalse(artifact2 is artifact1)
-    
+
     # Trying to create an artifact outside the directory fails.
     self.assertRaises(DefinitionError,
         self.context.source_artifact, "../parent")
@@ -160,40 +160,40 @@ mock_test = sebs.Test()
   def testAction(self):
     artifact = self.loader.source_artifact("blah")
     action = self.context.action(self.file.mock_rule, [artifact], "run", "foo")
-    
+
     self.assertEqual("run", action.verb)
     self.assertEqual("foo", action.name)
-    
+
     self.assertEqual(1, len(action.inputs))
     self.assertTrue(action.inputs[0] is artifact)
 
     action2 = self.context.action(self.file.mock_rule, [])
-    
+
     self.assertEqual("run", action.verb)
     self.assertEqual("foo", action.name)
     self.assertEqual("build", action2.verb)
     self.assertEqual("foo/bar.sebs:mock_rule", action2.name)
-    
+
   def testDerivedArtifact(self):
     action = self.context.action(self.file.mock_rule, [])
-    
+
     tmp_artifact = self.context.intermediate_artifact("grault", action)
     self.assertEqual("tmp/foo/grault", tmp_artifact.filename)
     self.assertTrue(tmp_artifact.action is action)
-    
+
     bin_artifact = self.context.output_artifact("bin", "garply", action)
     self.assertEqual("bin/garply", bin_artifact.filename)
     self.assertTrue(bin_artifact.action is action)
-    
+
     # Derived artifacts are added to the creating action.
     self.assertEqual(2, len(action.outputs))
     self.assertTrue(action.outputs[0] is tmp_artifact)
     self.assertTrue(action.outputs[1] is bin_artifact)
-    
+
     # Creating the same temporary artifact twice fails.
     self.assertRaises(DefinitionError,
         self.context.intermediate_artifact, "grault", action)
-    
+
     # Trying to create an artifact outside the directory fails.
     self.assertRaises(DefinitionError,
         self.context.intermediate_artifact, "../parent", action)

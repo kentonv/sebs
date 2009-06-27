@@ -39,7 +39,7 @@ class _ContextImpl(Context):
   def __init__(self, loader, filename, root_dir):
     typecheck(loader, Loader)
     typecheck(filename, basestring)
-    
+
     self.__loader = loader
     self.filename = filename
     self.full_filename = os.path.join("src", filename)
@@ -48,17 +48,17 @@ class _ContextImpl(Context):
 
   def source_artifact(self, filename):
     self.__validate_artifact_name(filename)
-    
+
     return self.__loader.source_artifact(
       os.path.join("src", self.directory, filename))
 
   def intermediate_artifact(self, filename, action):
     self.__validate_artifact_name(filename)
     typecheck(action, Action)
-    
+
     return self.__loader.derived_artifact(
       os.path.join("tmp", self.directory, filename), action)
-  
+
   def output_artifact(self, directory, filename, action):
     typecheck(directory, basestring)
     self.__validate_artifact_name(filename)
@@ -67,13 +67,13 @@ class _ContextImpl(Context):
     if directory not in ("bin", "include", "lib", "share"):
       raise DefinitionError(
         "'%s' is not a valid output directory." % directory)
-    
+
     return self.__loader.derived_artifact(
       os.path.join(directory, filename), action)
 
   def action(self, *vargs, **kwargs):
     return Action(*vargs, **kwargs)
-  
+
   def __validate_artifact_name(self, filename):
     typecheck(filename, basestring)
     normalized = os.path.normpath(filename).replace("\\", "/")
@@ -107,7 +107,7 @@ class _Builtins(object):
       self.__prefix = ""
     else:
       self.__prefix = parts[0] + "/"
-  
+
   def import_(self, name):
     # Absolute imports start with "//".
     if name.startswith("//"):
@@ -122,7 +122,7 @@ class _Builtins(object):
 class Loader(object):
   def __init__(self, root_dir):
     typecheck(root_dir, Directory)
-    
+
     self.__loaded_files = {}
     self.__source_artifacts = {}
     self.__derived_artifacts = {}
@@ -132,20 +132,20 @@ class Loader(object):
     """Load a SEBS file.  The filename is given relative to the root of
     the source tree (the "src" directory).  Returns an object whose fields
     correspond to the globals defined in that file."""
-    
+
     return self.load_with_timestamp(targetname)[0]
-    
+
   def load_with_timestamp(self, targetname):
     """Like load(), but returns a tuple where the second element is the target's
     timestamp.  This is most-recent modification time of the SEBS file defining
     the target and those that it imports."""
-    
+
     typecheck(targetname, basestring)
-    
+
     parts = targetname.rsplit(":", 1)
-    
+
     (file, context) = self.__load_file(parts[0])
-    
+
     if len(parts) == 1:
       return (file, context.timestamp)
     else:
@@ -171,19 +171,19 @@ class Loader(object):
     if filename.startswith("../") or filename.startswith("/"):
       raise DefinitionError(
         "'%s' is not within src." % filename)
-    
+
     if self.__root_dir.isdir("src/" + filename):
       filename = filename + "/SEBS"
-    
+
     if filename in self.__loaded_files:
       existing = self.__loaded_files[filename]
       if existing is None:
         raise DefinitionError("File recursively imports itself: %s", filename)
       return existing
-    
+
     context = _ContextImpl(self, filename, self.__root_dir)
     builtins = _Builtins(self, context)
-    
+
     def run():
       # TODO(kenton):  Remove SEBS itself from PYTHONPATH before parsing, since
       #   SEBS files should not be importing the SEBS implementation.
@@ -196,16 +196,16 @@ class Loader(object):
       vars = context.run(run)
     finally:
       del self.__loaded_files[filename]
-    
+
     # Copy the vars before deleting anything because any functions defined in
     # the file still hold a reference to the original map as part of their
     # environment, so modifying the original map could break those functions.
     vars = vars.copy()
-    
+
     # Delete "builtins", but not if the user replaced them with their own defs.
     if "sebs" in vars and vars["sebs"] is builtins:
       del vars["sebs"]
-    
+
     for name, value in vars.items():
       if isinstance(value, Rule) and value.context is context:
         # Set label on rule instance.
@@ -220,10 +220,10 @@ class Loader(object):
 
   def source_artifact(self, filename):
     typecheck(filename, basestring)
-    
+
     if filename in self.__source_artifacts:
       return self.__source_artifacts[filename]
-    
+
     result = Artifact(filename, None)
     self.__source_artifacts[filename] = result
     return result
@@ -231,7 +231,7 @@ class Loader(object):
   def derived_artifact(self, filename, action):
     typecheck(filename, basestring)
     typecheck(action, Action)
-    
+
     if filename in self.__derived_artifacts:
       raise DefinitionError(
         "Two different rules claim to build file '%s'.  Conflicting rules are "

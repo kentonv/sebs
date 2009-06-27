@@ -41,7 +41,7 @@ from sebs.builder import Builder, ActionRunner
 class MockRunner(ActionRunner):
   def __init__(self):
     self.actions = []
-  
+
   def run(self, action):
     self.actions.append(action)
     return True
@@ -58,7 +58,7 @@ class BuilderTest(unittest.TestCase):
     self.dir = VirtualDirectory()
     self.context = MockContext("mock.sebs", "src/mock.sebs")
     self.rule = Rule(self.context)
-  
+
   def doBuild(self, *artifacts):
     builder = Builder(self.dir)
     runner = MockRunner()
@@ -69,7 +69,7 @@ class BuilderTest(unittest.TestCase):
 
   def testNoAciton(self):
     input = Artifact("input", None)
-    
+
     self.assertRaises(DefinitionError, self.doBuild, input)
     self.dir.add("input", 2, "")
     self.assertEqual([], self.doBuild(input))
@@ -78,11 +78,11 @@ class BuilderTest(unittest.TestCase):
     input = Artifact("input", None)
     action = Action(self.rule, [input], "")
     output = Artifact("output", action)
-    
+
     # output doesn't exist.
     self.dir.add("input", 2, "")
     self.assertEqual([action], self.doBuild(output))
-    
+
     # output exists but is older than input.
     self.dir.add("output", 1, "")
     self.assertEqual([action], self.doBuild(output))
@@ -90,7 +90,7 @@ class BuilderTest(unittest.TestCase):
     # output exists and is newer than input.
     self.dir.add("output", 4, "")
     self.assertEqual([], self.doBuild(output))
-    
+
     # SEBS file is newer than output.
     self.context.timestamp = 5
     self.assertEqual([action], self.doBuild(output))
@@ -101,17 +101,17 @@ class BuilderTest(unittest.TestCase):
     action = Action(self.rule, [in1, in2], "")
     out1 = Artifact("out1", action)
     out2 = Artifact("out2", action)
-    
+
     # outputs don't exist.
     self.dir.add("in1", 2, "")
     self.dir.add("in2", 4, "")
     self.assertEqual([action], self.doBuild(out1, out2))
-    
+
     # only one output exists
     self.dir.add("out1", 5, "")
     self.assertEqual([action], self.doBuild(out1, out2))
     self.assertEqual([], self.doBuild(out1))
-    
+
     # both outputs exist, one is outdated
     self.dir.add("out2", 1, "")
     self.assertEqual([action], self.doBuild(out1, out2))
@@ -132,7 +132,7 @@ class BuilderTest(unittest.TestCase):
     temp = Artifact("temp", action1)
     action2 = Action(self.rule, [temp], "")
     output = Artifact("output", action2)
-    
+
     # outputs don't exist.
     self.dir.add("input", 2, "")
     self.assertEqual([action1, action2], self.doBuild(output))
@@ -171,7 +171,7 @@ class BuilderTest(unittest.TestCase):
     temp2 = Artifact("temp2", action2)
     action3 = Action(self.rule, [temp1, temp2], "")
     output = Artifact("output", action3)
-    
+
     # outputs don't exist.
     self.dir.add("input", 2, "")
     self.assertEqual([action1, action2, action3], self.doBuild(output))

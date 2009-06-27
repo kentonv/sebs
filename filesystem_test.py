@@ -43,24 +43,24 @@ class DirectoryTest(object):
   """Base class for DiskDirectoryTest and VirtualDirectoryTest.  Defines test
   cases that apply to both.  Does not subclass unittest.TestCase because we
   do not want the test loader to try to instantiate this class automatically.
-  
+
   The subclass must define a member called "dir" which is the directory being
   tested.  It must also implement addFile()."""
-  
+
   def addFile(self, name, mtime, content):
     """Add a file to self.dir."""
     raise NotImplementedError
-  
+
   def addDirectory(self, name):
     """Add a directory to self.dir."""
     raise NotImplementedError
-  
+
   def testExists(self):
     self.addFile("foo", 123, "Hello world!")
-    
+
     self.assertTrue(self.dir.exists("foo"))
     self.assertFalse(self.dir.exists("bar"))
-    
+
   def testIsdir(self):
     self.addDirectory("foo/bar/baz")
     self.assertTrue(self.dir.isdir("foo"))
@@ -70,12 +70,12 @@ class DirectoryTest(object):
 
     self.addFile("somefile", 123, "Hello world!")
     self.assertFalse(self.dir.isdir("somefile"))
-  
+
   def testGetMTime(self):
     self.addFile("foo", 123, "Hello world!")
-    
+
     self.assertEquals(123, self.dir.getmtime("foo"))
-    
+
     # Make sure touch() sets mtime to the current time.
     start = time.time()
     self.dir.touch("foo")
@@ -84,18 +84,18 @@ class DirectoryTest(object):
     # Give a one-second buffer in case the filesystem rounds floating-point
     # times to an integer.
     self.assertTrue(start - 1 <= mtime and mtime <= end + 1)
-    
+
     # Try a touch with an explicit time.
     self.dir.touch("foo", 321)
     self.assertEquals(321, self.dir.getmtime("foo"))
-  
+
   def testExecfile(self):
     self.addFile("foo", 123,
       "x = i + 5\n"
       "y = 'foo'\n"
       "import traceback\n"
       "filename, _, _, _ = traceback.extract_stack(limit = 1)[0]\n")
-    
+
     vars = {"i": 12}
     self.dir.execfile("foo", vars)
     self.assertTrue("x" in vars)
@@ -116,7 +116,7 @@ class DiskDirectoryTest(DirectoryTest, unittest.TestCase):
   def tearDown(self):
     super(DiskDirectoryTest, self).tearDown()
     shutil.rmtree(self.tempdir)
-  
+
   def addFile(self, name, mtime, content):
     path = os.path.join(self.tempdir, name)
     f = open(path, "wb")
@@ -151,10 +151,10 @@ class MappedDirectoryTest(DirectoryTest, unittest.TestCase):
       super(MappedDirectoryTest.MappingImpl, self).__init__()
       self.__prefix = prefix
       self.__real_dir = real_dir
-    
+
     def map(self, filename):
       return (self.__real_dir, os.path.join(self.__prefix, filename))
-  
+
   def setUp(self):
     self.virtual_dir = VirtualDirectory()
     self.dir = MappedDirectory(
