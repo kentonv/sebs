@@ -164,7 +164,7 @@ class SubprocessRunner(ActionRunner):
       elif isinstance(arg, Artifact):
         yield self.__working_dir.get_disk_path(arg.filename)
       elif isinstance(arg, ContentToken):
-        file = open(arg.artifact.filename, "rU")
+        file = open(self.__working_dir.get_disk_path(arg.filename), "rU")
         content = file.read()
         file.close()
         if split_content:
