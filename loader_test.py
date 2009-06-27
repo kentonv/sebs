@@ -90,6 +90,13 @@ bar3 = sebs.import_("//bar/bar.sebs")
     self.assertEqual(123, file.bar2.x)
     self.assertEqual(321, file.bar3.x)
 
+  def testLazyImportProhibited(self):
+    self.dir.add("src/foo.sebs", 0, "x = sebs")
+    self.dir.add("src/bar.sebs", 0, "")
+    foo = self.loader.load("foo.sebs")
+    bar = self.loader.load("bar.sebs")
+    self.assertRaises(DefinitionError, foo.x.import_, "bar.sebs")
+
   def testOverrideBuiltins(self):
     self.dir.add("src/foo.sebs", 0, """sebs = 123""")
     file = self.loader.load("foo.sebs")

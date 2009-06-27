@@ -94,6 +94,8 @@ class BuildFile(object):
 
 class _Builtins(object):
   def __init__(self, loader, context):
+    typecheck(loader, Loader)
+    typecheck(context, _ContextImpl)
     self.Rule = Rule
     self.Test = Test
     self.Artifact = Artifact
@@ -109,6 +111,11 @@ class _Builtins(object):
       self.__prefix = parts[0] + "/"
 
   def import_(self, name):
+    typecheck(name, str)
+
+    if (self.__loader is None):
+      raise DefinitionError("Imports must occur at file load time.")
+
     # Absolute imports start with "//".
     if name.startswith("//"):
       name = name[2:]
@@ -118,6 +125,9 @@ class _Builtins(object):
     if timestamp > self.__context.timestamp:
       self.__context.timestamp = timestamp
     return result
+
+  def disable(self):
+    self.__loader = None
 
 class Loader(object):
   def __init__(self, root_dir):
@@ -196,6 +206,9 @@ class Loader(object):
       vars = context.run(run)
     finally:
       del self.__loaded_files[filename]
+
+    # Prohibit lazy imports.
+    builtins.disable()
 
     # Copy the vars before deleting anything because any functions defined in
     # the file still hold a reference to the original map as part of their
