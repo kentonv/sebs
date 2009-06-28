@@ -188,24 +188,35 @@ mock_test = sebs.Test()
     self.assertEqual("tmp/foo/grault", tmp_artifact.filename)
     self.assertTrue(tmp_artifact.action is action)
 
+    mem_artifact = self.context.memory_artifact("plugh", action)
+    self.assertEqual("mem/foo/plugh", mem_artifact.filename)
+    self.assertTrue(mem_artifact.action is action)
+
     bin_artifact = self.context.output_artifact("bin", "garply", action)
     self.assertEqual("bin/garply", bin_artifact.filename)
     self.assertTrue(bin_artifact.action is action)
 
     # Derived artifacts are added to the creating action.
-    self.assertEqual(2, len(action.outputs))
+    self.assertEqual(3, len(action.outputs))
     self.assertTrue(action.outputs[0] is tmp_artifact)
-    self.assertTrue(action.outputs[1] is bin_artifact)
+    self.assertTrue(action.outputs[1] is mem_artifact)
+    self.assertTrue(action.outputs[2] is bin_artifact)
 
     # Creating the same temporary artifact twice fails.
     self.assertRaises(DefinitionError,
         self.context.intermediate_artifact, "grault", action)
+    self.assertRaises(DefinitionError,
+        self.context.memory_artifact, "plugh", action)
 
     # Trying to create an artifact outside the directory fails.
     self.assertRaises(DefinitionError,
         self.context.intermediate_artifact, "../parent", action)
     self.assertRaises(DefinitionError,
         self.context.intermediate_artifact, "/root", action)
+    self.assertRaises(DefinitionError,
+        self.context.memory_artifact, "../parent", action)
+    self.assertRaises(DefinitionError,
+        self.context.memory_artifact, "/root", action)
 
     # Creating the same output artifact twice fails.
     self.assertRaises(DefinitionError,

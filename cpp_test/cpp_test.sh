@@ -91,7 +91,7 @@ expect_success "$SEBS test sebs/cpp_test/cpp_test.sebs:passing_test &> $OUTPUT"
 
 expect_contains $OUTPUT '^PASS: sebs/cpp_test/cpp_test.sebs:passing_test$'
 
-expect_contains tmp/sebs/cpp_test/passing_test_output.txt \
+expect_contains $WORKING/tmp/sebs/cpp_test/passing_test_output.txt \
   '^BarFunction(test) FooFunction(test) $'
 
 echo "Running failing test..."
@@ -100,7 +100,7 @@ expect_failure "$SEBS test sebs/cpp_test/cpp_test.sebs:failing_test &> $OUTPUT"
 
 expect_contains $OUTPUT '^FAIL: sebs/cpp_test/cpp_test.sebs:failing_test$'
 
-expect_contains tmp/sebs/cpp_test/failing_test_output.txt \
+expect_contains $WORKING/tmp/sebs/cpp_test/failing_test_output.txt \
   '^FooFunction(fail) $'
 
 echo "PASS"

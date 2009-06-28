@@ -89,6 +89,27 @@ class DirectoryTest(object):
     self.dir.touch("foo", 321)
     self.assertEquals(321, self.dir.getmtime("foo"))
 
+  def testRead(self):
+    self.addFile("foo", 123, "Hello world!")
+    self.assertEquals("Hello world!", self.dir.read("foo"))
+
+  def testWrite(self):
+    start = time.time()
+    self.dir.write("foo", "Hello world!")
+    end = time.time()
+    self.assertEquals("Hello world!", self.dir.read("foo"))
+    mtime = self.dir.getmtime("foo")
+    # Give a one-second buffer in case the filesystem rounds floating-point
+    # times to an integer.
+    self.assertTrue(start - 1 <= mtime and mtime <= end + 1)
+
+    self.dir.write("bar/baz/qux", "blah")
+    self.assertEquals("blah", self.dir.read("bar/baz/qux"))
+
+    self.dir.write("corge", "hello", 123)
+    self.assertEquals("hello", self.dir.read("corge"))
+    self.assertEquals(123, self.dir.getmtime("corge"))
+
   def testExecfile(self):
     self.addFile("foo", 123,
       "x = i + 5\n"
@@ -106,6 +127,19 @@ class DirectoryTest(object):
     # See TODO in MappedDirectory.execfile().
     if not isinstance(self.dir, MappedDirectory):
       self.assertEqual("foo", vars["filename"])
+
+  def testMkdir(self):
+    self.dir.mkdir("foo/bar/baz")
+    self.assertTrue(self.dir.isdir("foo/bar/baz"))
+    self.assertTrue(self.dir.isdir("foo/bar"))
+    self.assertTrue(self.dir.isdir("foo"))
+
+    # Should be no-op.
+    self.dir.mkdir("")
+
+    self.addFile("qux", 123, "blah")
+    self.assertRaises(OSError, self.dir.mkdir, "qux")
+    self.assertRaises(OSError, self.dir.mkdir, "qux/corge")
 
 class DiskDirectoryTest(DirectoryTest, unittest.TestCase):
   def setUp(self):
@@ -143,7 +177,7 @@ class VirtualDirectoryTest(DirectoryTest, unittest.TestCase):
     self.dir.add_directory(name)
 
   def testGetDiskPath(self):
-    self.assertRaises(IOError, self.dir.get_disk_path, "foo/bar")
+    self.assertEquals(None, self.dir.get_disk_path("foo/bar"))
 
 class MappedDirectoryTest(DirectoryTest, unittest.TestCase):
   class MappingImpl(MappedDirectory.Mapping):
@@ -168,7 +202,7 @@ class MappedDirectoryTest(DirectoryTest, unittest.TestCase):
     self.virtual_dir.add_directory(os.path.join("mapped_prefix", name))
 
   def testGetDiskPath(self):
-    self.assertRaises(IOError, self.dir.get_disk_path, "foo/bar")
+    self.assertEquals(None, self.dir.get_disk_path("foo/bar"))
 
 if __name__ == "__main__":
   unittest.main()

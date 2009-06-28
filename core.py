@@ -279,8 +279,23 @@ class Context(object):
     Parameters:
       filename    The name of the generated file, relative to the SEBS file's
                   tmp directory (which is derived by taking the source directory
-                  and replacing 'src' with 'tmp').
+                  and replacing 'src' with 'tmp').  In other words, each
+                  directory in the source tree has its own namespace for
+                  intermediate files.
       action      The action which generates this artifact."""
+
+    raise NotImplementedError
+
+  def memory_artifact(self, filename, action):
+    """Like intermediate_artifact(), but creates an artifact which will be
+    stored in memory rather than on disk.  Between invocations of SEBS, all
+    such files will be stored in a single combined database file.  This is
+    good to use for small artifacts, especially ones storing command exit codes
+    or command-line flags for other commands (i.e. ones you'd use with
+    ContentToken).  Memory artifacts are stored in a virtual subdirectory
+    called "mem".  "mem" is a sibling of "src" and "tmp" with parallel
+    structure, but is not stored on the physical disk.  Memory artifacts can
+    only store text, not binary data."""
 
     raise NotImplementedError
 

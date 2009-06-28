@@ -59,6 +59,13 @@ class _ContextImpl(Context):
     return self.__loader.derived_artifact(
       os.path.join("tmp", self.directory, filename), action)
 
+  def memory_artifact(self, filename, action):
+    self.__validate_artifact_name(filename)
+    typecheck(action, Action)
+
+    return self.__loader.derived_artifact(
+      os.path.join("mem", self.directory, filename), action)
+
   def output_artifact(self, directory, filename, action):
     typecheck(directory, basestring)
     self.__validate_artifact_name(filename)

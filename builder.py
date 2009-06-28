@@ -33,8 +33,10 @@ import collections
 import os
 import subprocess
 import sys
+import tempfile
 
-from sebs.core import Rule, Test, Action, Artifact, ContentToken, DefinitionError
+from sebs.core import Rule, Test, Action, Artifact, ContentToken, \
+                      DefinitionError
 from sebs.filesystem import Directory
 from sebs.helpers import typecheck
 
@@ -95,6 +97,7 @@ class SubprocessRunner(ActionRunner):
     self.__working_dir = working_dir
     self.__stdout = stdout
     self.__use_color = self.__stdout.isatty()
+    self.__temp_files_for_mem = {}
 
     # TODO(kenton):  We should *add* src to the existing PYTHONPATH instead of
     #   overwrite, but there is one problem:  The SEBS Python archive may be
@@ -111,15 +114,9 @@ class SubprocessRunner(ActionRunner):
       self.__stdout.write("%s: %s\n" % (action.verb, action.name))
 
     # Make sure the output directories exist.
+    # TODO(kenton):  Also delete output files from previous runs?
     for output in action.outputs:
-      dirname = os.path.dirname(output.filename)
-      # If the path exists and is a directory, we don't have to create anything,
-      # but makedirs() will raise an error if we call it.  If the path exists
-      # but is *not* a directory, we still call makedirs() so that it raises an
-      # appropriate error.
-      if not self.__working_dir.exists(dirname) or \
-         not self.__working_dir.isdir(dirname):
-        os.makedirs(self.__working_dir.get_disk_path(dirname))
+      self.__working_dir.mkdir(os.path.dirname(output.filename))
 
     # Capture stdout if requested.
     # TODO(kenton):  Capture stdout/stderr even when not requested so that it
@@ -128,32 +125,43 @@ class SubprocessRunner(ActionRunner):
       stdout = None
       stderr = None
     else:
-      stdout = open(action.stdout.filename, "wb")
+      disk_path = self.__get_disk_path(action.stdout.filename)
+      if disk_path is None:
+        stdout = subprocess.PIPE
+      else:
+        stdout = open(disk_path, "wb")
       if action.merge_standard_outs:
-        stderr = stdout
+        stderr = subprocess.STDOUT
       else:
         stderr = None
 
-    for command in action.commands:
-      formatted_command = list(self.__format_command(command))
-      proc = subprocess.Popen(formatted_command,
-                              stdout = stdout, stderr = stderr,
-                              env = self.__env)
+    try:
+      for command in action.commands:
+        formatted_command = list(self.__format_command(command))
+        proc = subprocess.Popen(formatted_command,
+                                stdout = stdout, stderr = stderr,
+                                env = self.__env)
 
-      if stderr is not None and stderr is not stdout:
-        stderr.close()
-      if stdout is not None:
-        stdout.close()
+        (output, _) = proc.communicate()
 
-      if proc.wait() != 0:
-        # Set modification time of all outputs to zero to make sure they are
-        # rebuilt on the next run.
-        for output in action.outputs:
-          try:
-            self.__working_dir.touch(output.filename, 0)
-          except Exception:
-            pass
-        return False
+        if stdout is subprocess.PIPE:
+          assert output is not None
+          self.__working_dir.write(action.stdout.filename, output)
+        elif stdout is not None:
+          stdout.close()
+
+        if proc.returncode != 0:
+          self.__resolve_mem_files()
+          # Set modification time of all outputs to zero to make sure they are
+          # rebuilt on the next run.
+          for output in action.outputs:
+            try:
+              self.__working_dir.touch(output.filename, 0)
+            except Exception:
+              pass
+          return False
+    finally:
+      self.__resolve_mem_files()
 
     return True
 
@@ -162,11 +170,9 @@ class SubprocessRunner(ActionRunner):
       if isinstance(arg, basestring):
         yield arg
       elif isinstance(arg, Artifact):
-        yield self.__working_dir.get_disk_path(arg.filename)
+        yield self.__get_disk_path(arg.filename)
       elif isinstance(arg, ContentToken):
-        file = open(self.__working_dir.get_disk_path(arg.filename), "rU")
-        content = file.read()
-        file.close()
+        content = self.__read_file(arg.filename)
         if split_content:
           for part in content.split():
             yield part
@@ -176,6 +182,52 @@ class SubprocessRunner(ActionRunner):
         yield "".join(self.__format_command(arg, split_content = False))
       else:
         raise AssertionError("Invalid argument.")
+
+  def __get_disk_path(self, filename):
+    """Get a suitable on-disk path for the given filename.  Returns the file's
+    actual on-disk path if it has one, otherwise returns a temporary file.
+    __resolve_mem_files() must be called later to read the contents of the
+    temporary files back into memory."""
+    result = self.__working_dir.get_disk_path(filename)
+    if result is None:
+      if filename in self.__temp_files_for_mem:
+        result = self.__temp_files_for_mem[filename]
+      else:
+        (fd, result) = tempfile.mkstemp(
+            suffix = "_" + os.path.basename(filename))
+        if self.__working_dir.exists(filename):
+          os.write(fd, self.__working_dir.read(filename))
+          os.close(fd)
+          mtime = self.__working_dir.getmtime(filename)
+          os.utime(result, (mtime, mtime))
+        else:
+          os.close(fd)
+        # We don't track whether files are executable so we just set the
+        # executable bit on everything just in case.
+        os.chmod(result, 0700)
+        self.__temp_files_for_mem[filename] = result
+    return result
+
+  def __read_file(self, filename):
+    """Equivalent to self.__working_dir.read(filename) except that if a call
+    to self.__get_disk_path() created a temporary file representing this file,
+    then the temporary file is read instead."""
+    if filename in self.__temp_files_for_mem:
+      file = open(self.__temp_files_for_mem[filename], "rU")
+      result = file.read()
+      file.close()
+      return result
+    else:
+      return self.__working_dir.read(filename)
+
+  def __resolve_mem_files(self):
+    """See __get_disk_path()."""
+    for (filename, diskfile) in self.__temp_files_for_mem.items():
+      file = open(diskfile, "rb")
+      self.__working_dir.write(filename, file, os.path.getmtime(diskfile))
+      file.close()
+      os.remove(diskfile)
+    self.__temp_files_for_mem = {}
 
 # TODO(kenton):  ActionRunner which checks if the inputs have actually changed
 #   (e.g. by hashing them) and skips the action if not (just touches the
@@ -208,6 +260,10 @@ class _ArtifactState(object):
     if artifact.action is not None:
       for input in artifact.action.inputs:
         input_state = state_map.artifact_state(input)
+        # TODO(kenton):  Should we round these timestamps to the nearest
+        #   integer since disk filesystems often do that?  Otherwise, when
+        #   comparing a disk file to a mem file we might get false positives.
+        #   However, I haven't yet seen this happen in practice.
         if input_state.is_dirty or self.timestamp < input_state.timestamp:
           self.is_dirty = True
       if self.timestamp < artifact.action.rule.context.timestamp:

@@ -55,6 +55,7 @@
 #
 # Background server that accepts commands and doesn't have to reload sebs files.
 
+import cPickle
 import getopt
 import os
 import shutil
@@ -62,28 +63,32 @@ import sys
 
 from sebs.builder import Builder, DryRunner, SubprocessRunner
 from sebs.core import Rule, Test
-from sebs.filesystem import DiskDirectory, MappedDirectory
+from sebs.filesystem import DiskDirectory, VirtualDirectory, MappedDirectory
 from sebs.helpers import typecheck
 from sebs.loader import Loader, BuildFile
 
 class UsageError(Exception):
   pass
 
-class _AlternateOutputMapping(MappedDirectory.Mapping):
+class _WorkingDirMapping(MappedDirectory.Mapping):
   """Sometimes we want to put all build output (including intermediates) in
-  a different directory, e.g. when cross-compiling.  This class implements a
-  mapping which can be used with MappedDirectory to accomplish that."""
+  a different directory, e.g. when cross-compiling.  We also want to put the
+  "mem" subdirectory into a VirtualDirectory.  This class implements a
+  mapping which can be used with MappedDirectory to accomplish these things."""
 
-  def __init__(self, source_dir, output_dir):
-    super(_AlternateOutputMapping, self).__init__()
+  def __init__(self, source_dir, output_dir, mem_dir):
+    super(_WorkingDirMapping, self).__init__()
     self.__source_dir = source_dir
     self.__output_dir = output_dir
+    self.__mem_dir = mem_dir
 
   def map(self, filename):
     # Note:  We intentionally consider any directory name starting with "src"
     #   (including, e.g., "src-unofficial") as a source directory.
     if filename.startswith("src"):
       return (self.__source_dir, filename)
+    elif filename.startswith("mem/"):
+      return (self.__mem_dir, filename[4:])
     else:
       return (self.__output_dir, filename)
 
@@ -161,25 +166,46 @@ def main(argv):
   except getopt.error, message:
     raise UsageError(message)
 
-  root_dir = DiskDirectory(".")
+  source_dir = DiskDirectory(".")
+  output_dir = source_dir
+  mem_dir = VirtualDirectory()
 
   for name, value in opts:
     if name in ("-h", "--help"):
       print __doc__
       return 0
     elif name == "--output":
-      root_dir = MappedDirectory(
-          _AlternateOutputMapping(root_dir, DiskDirectory(value)))
+      output_dir = DiskDirectory(value)
+
+  root_dir = MappedDirectory(
+      _WorkingDirMapping(source_dir, output_dir, mem_dir))
 
   if len(args) == 0:
     raise UsageError("Missing command.")
 
-  if args[0] in ("build", "test"):
-    return build(root_dir, args)
-  elif args[0] == "clean":
-    return clean(root_dir, args)
-  else:
-    raise UsageError("Unknown command: %s" % args[0])
+  if os.path.exists("mem.pickle"):
+    db = open("mem.pickle", "rb")
+    mem_dir.restore(cPickle.load(db))
+    db.close()
+
+  save_mem = True
+
+  try:
+    if args[0] in ("build", "test"):
+      return build(root_dir, args)
+    elif args[0] == "clean":
+      save_mem = False
+      return clean(root_dir, args)
+    else:
+      raise UsageError("Unknown command: %s" % args[0])
+  finally:
+    if save_mem:
+      db = open("mem.pickle", "wb")
+      cPickle.dump(mem_dir.save(), db, cPickle.HIGHEST_PROTOCOL)
+      db.close()
+    else:
+      if os.path.exists("mem.pickle"):
+        os.remove("mem.pickle")
 
 if __name__ == "__main__":
   try:
