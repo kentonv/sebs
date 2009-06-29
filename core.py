@@ -91,8 +91,8 @@ class Artifact(object):
 
   def contents(self):
     """Returns a ContentToken for this Artifact, which can be used when building
-    a command for some Action to say that the contents of the file should be
-    used as an argument to the command.  See Action.add_command()."""
+    a SubprocessCommand to say that the contents of the file should be
+    used as an argument to the command."""
 
     return ContentToken(self)
 
@@ -101,7 +101,7 @@ class Artifact(object):
 
 class ContentToken(object):
   """A placeholder for the contents of a file.  See Artifact.contents() and
-  Action.add_command().
+  SubprocessCommand.
 
   Attributes:
     artifact   The Artifact for which this represents the contents."""
@@ -109,6 +109,11 @@ class ContentToken(object):
   def __init__(self, artifact):
     typecheck(artifact, Artifact)
     self.artifact = artifact
+
+class CommandBase(object):
+  """Dummy class used for type checking.  Command (in command.py) is the only
+  direct subclass."""
+  pass
 
 class Action(object):
   """Represents a step in the build process, which has some inputs and some
@@ -125,17 +130,10 @@ class Action(object):
     name       The name of the thing being operated upon.  This forms part of
                the message printed to the console when the action is executed.
                If None, the name of the rule is used.
-    commands   List of commands to execute in order to build the outputs from
-               the inputs.  See add_command() for more about the format of
-               each command.
-    stdout     An Artifact which represents the standard output of this action,
-               if standard output is being captured.  This Artifact is also
-               listed in the outputs list.  This attribute is None if standard
-               output is not being captured.  Call capture_stdout() to
-               initialize this.
-    merge_standard_outs  A boolean, default False.  If True, stderr will be
-               merged into stdout when this Action runs.  This is relevant
-               when output is being captured."""
+    command    A Command to execute in order to build the outputs from
+               the inputs.  Must be set using set_command(), since when a new
+               Action is constructed its output Artifacts don't exist yet, and
+               the command probably depends on the output Artifacts."""
 
   def __init__(self, rule, inputs, verb = "build", name = None):
     typecheck(rule, Rule)
@@ -148,11 +146,7 @@ class Action(object):
     self.outputs = []  # Filled in by Artifact.__init__()
     self.verb = verb
     self.__name = name
-    self.commands = []  # Filled in by add_command().
-    self.stdout = None
-    self.merge_standard_outs = False
-    self.pass_message = None
-    self.fail_mesasge = None
+    self.command = None
 
     for input in inputs:
       input.dependents.append(self)
@@ -165,67 +159,9 @@ class Action(object):
 
   name = property(__get_name)
 
-  def add_command(self, command):
-    """Add a command to the Action.  The command is a list of arguments like
-    you'd pass to the POSIX exec() function -- the first argument is an
-    executable name and the arguments make up the process's argv list.  Each
-    argument in the list can be one of the following:
-
-      string        A literal string.  Will be passed verbatim.
-      Artifact      Will be replaced by the Artifact's filename.  The Artifact
-                    must be one of those listed in self.inputs or self.outputs.
-      ContentToken  Will be replaced by zero or more arguments based on the
-                    contents of a file.  The text will be split on whitespace
-                    to form multiple arguments.  The ContentToken's
-                    corresponding Artifact must be in self.inputs.
-      list          A list of argument fragments which will be concatenated to
-                    form a single argument.  Each item in the list may be of any
-                    of the types allowed in the top-level command list, but note
-                    that they will be joined with no delimiter between them.
-                    ContentTokens in the list will be replaced by the verbatim
-                    content *including* whitespace -- no splitting is done."""
-
-    typecheck(command, list)
-
-    def check_element_types(args):
-      for arg in args:
-        if isinstance(arg, list):
-          check_element_types(arg)
-        elif isinstance(arg, Artifact):
-          if arg not in self.inputs and arg not in self.outputs:
-            raise DefinitionError(
-              "Artifact used in command was not listed among inputs: %s" % arg)
-        elif isinstance(arg, ContentToken):
-          if arg.artifact not in self.inputs:
-            raise DefinitionError(
-              "Artifact used in command was not listed among inputs: %s" %
-              arg.artifact)
-        elif not isinstance(arg, basestring):
-          raise TypeError("Argument is not one of the allowed types: %s" % arg)
-
-    check_element_types(command)
-
-    self.commands.append(command)
-
-  def capture_stdout(self, artifact, include_stderr=False):
-    """Indicates that the standard output of this action should be written to
-    the given Artifact.  The Artifact must be a derived artifact with this
-    Action as its creator.  If include_stderr is True, then stdout and
-    stderr will both be written to the Artifact."""
-
-    typecheck(artifact, Artifact)
-    typecheck(include_stderr, bool)
-
-    if self.stdout is not None:
-      raise DefinitionError("Standard output is already being captured.")
-
-    if artifact.action is not self:
-      raise DefinitionError(
-        "Artifact passed to capture_stdout() must have this Action as its "
-        "creating Action.")
-
-    self.stdout = artifact
-    self.merge_standard_outs = include_stderr
+  def set_command(self, command):
+    typecheck(command, CommandBase)
+    self.command = command
 
 class Context(object):
   """Class representing the current SEBS context.  Every Rule object is
@@ -312,8 +248,8 @@ class Context(object):
     raise NotImplementedError
 
   def action(self, *vargs, **kwargs):
-    """Returns a new Action.  The caller should call the result's add_command()
-    method to add commands which implement the action.  The parameters
+    """Returns a new Action.  The caller should call the result's set_command()
+    method to set the command which implements the action.  The parameters
     correspond to the parameters to the Action constructor, although you should
     not call the Action constructor directly."""
 
@@ -389,8 +325,9 @@ class Test(Rule):
   """A special kind of Rule that represents a test.
 
   Attributes (in addition to Rule's attributes):
-    test_action  An action which, when executed, runs the test.  The command
-                 should exit normally if the test passes or with an error code
-                 if it fails.  The test should always capture stdout and stderr
-                 to a file.  As with Rule.outputs, test_action is not actually
-                 computed until expand_once() is called."""
+    test_result_artifact  An artifact which will contain the text "true" if
+                          the test passes or "false" if it fails.  (Hint:
+                          Use SuprocessCommand's capture_exit_status to generate
+                          this.)
+    test_output_artifact  An artifact which will contain the test's console
+                          output, useful for debugging."""

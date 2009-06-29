@@ -70,11 +70,17 @@ class ShellTest(_sebs.Test):
 
     output = self.context.intermediate_artifact(
       os.path.splitext(self.src)[0] + "_output.txt", action)
+    result = self.context.memory_artifact(
+      os.path.splitext(self.src)[0] + "_result", action)
 
-    action.add_command([main_artifact])
-    action.capture_stdout(output, include_stderr=True)
+    action.set_command(
+        _sebs.SubprocessCommand([main_artifact], [main_artifact], [],
+                                capture_stdout = output,
+                                capture_stderr = output,
+                                capture_exit_status = result))
 
-    self.test_action = action
+    self.test_result_artifact = result
+    self.test_output_artifact = output
     self.outputs = []
 
 cpp_test = ShellTest("cpp_test/cpp_test.sh")

@@ -34,6 +34,7 @@ import os
 from sebs.core import Rule, Test, Artifact, Action, Context, DefinitionError
 from sebs.filesystem import Directory
 from sebs.helpers import typecheck
+import sebs.command as command
 
 class _ContextImpl(Context):
   def __init__(self, loader, filename, root_dir):
@@ -109,6 +110,14 @@ class _Builtins(object):
     self.Action = Action
     self.DefinitionError = DefinitionError
     self.typecheck = typecheck
+
+    self.Command            = command.Command
+    self.EchoCommand        = command.EchoCommand
+    self.EnvironmentCommand = command.EnvironmentCommand
+    self.DoAllCommand       = command.DoAllCommand
+    self.ConditionalCommand = command.ConditionalCommand
+    self.SubprocessCommand  = command.SubprocessCommand
+
     self.__loader = loader
     self.__context = context
     parts = context.filename.rsplit("/", 1)

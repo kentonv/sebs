@@ -37,7 +37,7 @@ import cStringIO
 import os
 import subprocess
 
-from sebs.core import Artifact, DefinitionError, ContentToken
+from sebs.core import Artifact, DefinitionError, ContentToken, CommandBase
 from sebs.helpers import typecheck
 
 class CommandContext(object):
@@ -92,7 +92,7 @@ class ArtifactEnumerator(object):
     same value."""
     raise NotImplementedError
 
-class Command(object):
+class Command(CommandBase):
   """Represents something which an Action does, e.g. executing a shell command.
   Command implementations are not allowed to create new Actions or Artifacts --
   they can only use the ones passed to their constructors.  In general, they

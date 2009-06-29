@@ -50,7 +50,9 @@ class _Base(sebs.Rule):
                                      src_artifact.filename)
         obj = self.context.intermediate_artifact(name + ".o", action)
         self.objects.append(obj)
-        action.add_command(cflags + ["-c", src_artifact, "-o", obj])
+        action.set_command(
+          sebs.SubprocessCommand(cflags + ["-c", src_artifact, "-o", obj],
+                                 [src_artifact], [obj]))
       elif ext not in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
         raise sebs.DefinitionError(
           "File extension not recognized as a C++ source or header: %s" % src)
@@ -96,10 +98,13 @@ class Library(_Base):
     # Remove existing library, since we don't know if it was created with the
     # same set of sources.  It appears the "ar" command does not have any
     # option for "remove any files that aren't in the list".
-    static_link_action.add_command(["rm", "-f", static_lib])
+    rm = sebs.SubprocessCommand(["rm", "-f", static_lib], [], [static_lib])
 
     # Create the library archive, with a symbol table.
-    static_link_action.add_command(["ar", "-qcs", static_lib] + self.objects)
+    ar = sebs.SubprocessCommand(["ar", "-qcs", static_lib] + self.objects,
+                                self.objects, [static_lib])
+
+    static_link_action.set_command(sebs.DoAllCommand([rm, ar]))
 
     self.static_library = static_lib
     self.outputs = [static_lib]
@@ -123,7 +128,9 @@ class Binary(_Base):
       output = self.context.output_artifact(
           "bin", self.output_name, link_action)
 
-    link_action.add_command(["c++", "-o", output] + all_inputs)
+    link_action.set_command(
+      sebs.SubprocessCommand(["c++", "-o", output] + all_inputs,
+                             all_inputs, [output]))
 
     self.binary = output
     self.outputs = [output]
@@ -140,8 +147,17 @@ class Test(sebs.Test):
     action = self.context.action(self, [self.__binary_rule.binary], "test")
     output = self.context.intermediate_artifact(
         "%s_output.txt" % self.__binary_rule.anonymous_name(), action)
-    action.add_command([self.__binary_rule.binary])
-    action.capture_stdout(output, include_stderr=True)
+    result = self.context.memory_artifact(
+        "%s_result" % self.__binary_rule.anonymous_name(), action)
+    action.set_command(
+        sebs.SubprocessCommand([self.__binary_rule.binary],
+                               [self.__binary_rule.binary], [],
+                               capture_stdout = output,
+                               capture_stderr = output,
+                               capture_exit_status = result))
 
-    self.test_action = action
-    self.outputs = []
+    self.test_result_artifact = result
+    self.test_output_artifact = output
+
+    # If built directly, build the test binary but don't run it.
+    self.outputs = [self.__binary_rule.binary]

@@ -391,16 +391,16 @@ class SubprocessCommandTest(unittest.TestCase):
     self.assertRaises(DefinitionError, SubprocessCommand, [artifact], [], [])
     self.assertRaises(DefinitionError, SubprocessCommand, [[artifact]], [], [])
     self.assertRaises(DefinitionError, SubprocessCommand,
-                      [ContentToken(artifact)], [], [])
+                      [artifact.contents()], [], [])
     self.assertRaises(DefinitionError, SubprocessCommand,
-                      [ContentToken(artifact)], [], [artifact])
+                      [artifact.contents()], [], [artifact])
 
     SubprocessCommand(["foo"], [], [])
     SubprocessCommand([artifact], [artifact], [])
     SubprocessCommand([artifact], [], [artifact])
     SubprocessCommand([[artifact]], [artifact], [])
     SubprocessCommand([[artifact]], [], [artifact])
-    SubprocessCommand([ContentToken(artifact)], [artifact], [])
+    SubprocessCommand([artifact.contents()], [artifact], [])
 
   def testEnumerateArtifacts(self):
     inputs = [ Artifact("input1", None), Artifact("input2", None) ]
@@ -433,11 +433,11 @@ class SubprocessCommandTest(unittest.TestCase):
 
     self.assertFormattedAs(["foo"], ["foo"])
     self.assertFormattedAs([artifact], ["disk/filename"], "filename")
-    self.assertFormattedAs([ContentToken(artifact)],
+    self.assertFormattedAs([artifact.contents()],
                            ["content"], "$(filename)")
     self.assertFormattedAs([["foo"]], ["foo"])
     self.assertFormattedAs([[artifact]], ["disk/filename"], "filename")
-    self.assertFormattedAs([[ContentToken(artifact)]],
+    self.assertFormattedAs([[artifact.contents()]],
                            ["content"], "$(filename)")
 
     self.assertFormattedAs(["foo", ["bar", ["baz", "qux"], "corge"], "grault"],
@@ -452,10 +452,10 @@ class SubprocessCommandTest(unittest.TestCase):
 
     self.__dir.write(self.__artifact.filename, "content   with\nspaces")
 
-    self.assertFormattedAs(["(", ContentToken(artifact), ")"],
+    self.assertFormattedAs(["(", artifact.contents(), ")"],
                            ["(", "content", "with", "spaces", ")"],
                            "( $(filename) )")
-    self.assertFormattedAs([["(", ContentToken(artifact), ")"]],
+    self.assertFormattedAs([["(", artifact.contents(), ")"]],
                            ["(content   with\nspaces)"],
                            "($(filename))")
 

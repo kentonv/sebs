@@ -60,25 +60,5 @@ class CoreTest(unittest.TestCase):
     rule.label = "foo"
     self.assertEqual("foo.sebs:foo", rule.name)
 
-  def testAddCommand(self):
-    artifact = Artifact("foo", None)
-    other_artifact = Artifact("bar", None)
-    rule = MockRule(MockContext("foo.sebs", "src/foo.sebs"))
-    action = Action(rule, [artifact])
-
-    # Should work.
-    command = ["foo", artifact, artifact.contents(),
-                ["bar", artifact, artifact.contents()]]
-    action.add_command(command)
-    self.assertEqual(command, action.commands[0])
-
-    # Should not work.
-    self.assertRaises(TypeError, action.add_command, "foo")
-    self.assertRaises(TypeError, action.add_command, ["foo", 123])
-    self.assertRaises(TypeError, action.add_command, [[123, "bar"]])
-    self.assertRaises(DefinitionError, action.add_command, [other_artifact])
-    self.assertRaises(DefinitionError, action.add_command,
-                      [other_artifact.contents()])
-
 if __name__ == "__main__":
   unittest.main()

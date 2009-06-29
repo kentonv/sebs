@@ -39,6 +39,9 @@ from sebs.core import Rule, Test, Action, Artifact, ContentToken, \
                       DefinitionError
 from sebs.filesystem import Directory
 from sebs.helpers import typecheck
+from sebs.command import CommandContext, Command, SubprocessCommand
+
+# TODO(kenton):  ActionRunner and implementations belong in a separate module.
 
 class ActionRunner(object):
   """Abstract interface for an object which can execute actions."""
@@ -87,6 +90,76 @@ class DryRunner(ActionRunner):
       else:
         raise AssertionError("Invalid argument.")
 
+class _CommandContextImpl(CommandContext):
+  def __init__(self, working_dir):
+    self.__working_dir = working_dir
+    self.__temp_files_for_mem = {}
+
+  def get_disk_path(self, artifact, use_temporary=True):
+    filename = artifact.filename
+    result = self.__working_dir.get_disk_path(filename)
+    if result is None and use_temporary:
+      if filename in self.__temp_files_for_mem:
+        result = self.__temp_files_for_mem[filename]
+      else:
+        (fd, result) = tempfile.mkstemp(
+            suffix = "_" + os.path.basename(filename))
+        if self.__working_dir.exists(filename):
+          os.write(fd, self.__working_dir.read(filename))
+          os.close(fd)
+          mtime = self.__working_dir.getmtime(filename)
+          os.utime(result, (mtime, mtime))
+        else:
+          os.close(fd)
+        # We don't track whether files are executable so we just set the
+        # executable bit on everything just in case.
+        os.chmod(result, 0700)
+        self.__temp_files_for_mem[filename] = result
+    return result
+
+  def read(self, artifact):
+    filename = artifact.filename
+    if filename in self.__temp_files_for_mem:
+      file = open(self.__temp_files_for_mem[filename], "rU")
+      result = file.read()
+      file.close()
+      return result
+    else:
+      return self.__working_dir.read(filename)
+
+  def write(self, artifact, content):
+    filename = artifact.filename
+    if filename in self.__temp_files_for_mem:
+      file = open(self.__temp_files_for_mem[filename], "wb")
+      file.write(content)
+      file.close()
+    else:
+      self.__working_dir.write(filename, content)
+
+  def getenv(self, env_name):
+    if env_name in os.environ:
+      return os.environ[env_name]
+    else:
+      return None
+
+  def subprocess(self, args, **kwargs):
+    if "stdin" in kwargs and isinstance(kwargs["stdin"], str):
+      stdin_str = kwargs["stdin"]
+      kwargs["stdin"] = subprocess.PIPE
+    else:
+      stdin_str = None
+    proc = subprocess.Popen(args, **kwargs)
+    stdout_str, stderr_str = proc.communicate(stdin_str)
+    return (proc.returncode, stdout_str, stderr_str)
+
+  def resolve_mem_files(self):
+    for (filename, diskfile) in self.__temp_files_for_mem.items():
+      file = open(diskfile, "rb")
+      self.__working_dir.write(filename, file, os.path.getmtime(diskfile))
+      file.close()
+      os.remove(diskfile)
+    self.__temp_files_for_mem = {}
+
 class SubprocessRunner(ActionRunner):
   """An ActionRunner which actually executes the commands."""
 
@@ -118,116 +191,22 @@ class SubprocessRunner(ActionRunner):
     for output in action.outputs:
       self.__working_dir.mkdir(os.path.dirname(output.filename))
 
-    # Capture stdout if requested.
-    # TODO(kenton):  Capture stdout/stderr even when not requested so that it
-    #   can be printed all at once to avoid interleaving parallel commands.
-    if action.stdout is None:
-      stdout = None
-      stderr = None
-    else:
-      disk_path = self.__get_disk_path(action.stdout.filename)
-      if disk_path is None:
-        stdout = subprocess.PIPE
-      else:
-        stdout = open(disk_path, "wb")
-      if action.merge_standard_outs:
-        stderr = subprocess.STDOUT
-      else:
-        stderr = None
-
+    context = _CommandContextImpl(self.__working_dir)
     try:
-      for command in action.commands:
-        formatted_command = list(self.__format_command(command))
-        proc = subprocess.Popen(formatted_command,
-                                stdout = stdout, stderr = stderr,
-                                env = self.__env)
-
-        (output, _) = proc.communicate()
-
-        if stdout is subprocess.PIPE:
-          assert output is not None
-          self.__working_dir.write(action.stdout.filename, output)
-        elif stdout is not None:
-          stdout.close()
-
-        if proc.returncode != 0:
-          self.__resolve_mem_files()
-          # Set modification time of all outputs to zero to make sure they are
-          # rebuilt on the next run.
-          for output in action.outputs:
-            try:
-              self.__working_dir.touch(output.filename, 0)
-            except Exception:
-              pass
-          return False
+      if not action.command.run(context, sys.stderr):
+        context.resolve_mem_files()
+        # Set modification time of all outputs to zero to make sure they are
+        # rebuilt on the next run.
+        for output in action.outputs:
+          try:
+            self.__working_dir.touch(output.filename, 0)
+          except Exception:
+            pass
+        return False
     finally:
-      self.__resolve_mem_files()
+      context.resolve_mem_files()
 
     return True
-
-  def __format_command(self, command, split_content=True):
-    for arg in command:
-      if isinstance(arg, basestring):
-        yield arg
-      elif isinstance(arg, Artifact):
-        yield self.__get_disk_path(arg.filename)
-      elif isinstance(arg, ContentToken):
-        content = self.__read_file(arg.filename)
-        if split_content:
-          for part in content.split():
-            yield part
-        else:
-          yield content
-      elif isinstance(arg, list):
-        yield "".join(self.__format_command(arg, split_content = False))
-      else:
-        raise AssertionError("Invalid argument.")
-
-  def __get_disk_path(self, filename):
-    """Get a suitable on-disk path for the given filename.  Returns the file's
-    actual on-disk path if it has one, otherwise returns a temporary file.
-    __resolve_mem_files() must be called later to read the contents of the
-    temporary files back into memory."""
-    result = self.__working_dir.get_disk_path(filename)
-    if result is None:
-      if filename in self.__temp_files_for_mem:
-        result = self.__temp_files_for_mem[filename]
-      else:
-        (fd, result) = tempfile.mkstemp(
-            suffix = "_" + os.path.basename(filename))
-        if self.__working_dir.exists(filename):
-          os.write(fd, self.__working_dir.read(filename))
-          os.close(fd)
-          mtime = self.__working_dir.getmtime(filename)
-          os.utime(result, (mtime, mtime))
-        else:
-          os.close(fd)
-        # We don't track whether files are executable so we just set the
-        # executable bit on everything just in case.
-        os.chmod(result, 0700)
-        self.__temp_files_for_mem[filename] = result
-    return result
-
-  def __read_file(self, filename):
-    """Equivalent to self.__working_dir.read(filename) except that if a call
-    to self.__get_disk_path() created a temporary file representing this file,
-    then the temporary file is read instead."""
-    if filename in self.__temp_files_for_mem:
-      file = open(self.__temp_files_for_mem[filename], "rU")
-      result = file.read()
-      file.close()
-      return result
-    else:
-      return self.__working_dir.read(filename)
-
-  def __resolve_mem_files(self):
-    """See __get_disk_path()."""
-    for (filename, diskfile) in self.__temp_files_for_mem.items():
-      file = open(diskfile, "rb")
-      self.__working_dir.write(filename, file, os.path.getmtime(diskfile))
-      file.close()
-      os.remove(diskfile)
-    self.__temp_files_for_mem = {}
 
 # TODO(kenton):  ActionRunner which checks if the inputs have actually changed
 #   (e.g. by hashing them) and skips the action if not (just touches the
@@ -336,6 +315,7 @@ class Builder(object):
     typecheck(root_dir, Directory)
 
     self.__state_map = _StateMap(root_dir)
+    self.__root_dir = root_dir
 
     # Actions which are ready but haven't been started.
     self.__action_queue = collections.deque()
@@ -376,17 +356,13 @@ class Builder(object):
 
     test.expand_once()
 
-    if test.test_action.stdout is None:
-      raise DefinitionError(
-        "Test actions must capture stdout.  Offending rule: %s" % test.name)
-
-    for input in test.test_action.inputs:
+    for input in test.test_result_artifact.action.inputs:
       self.add_artifact(input)
 
-    if self.__state_map.artifact_state(test.test_action.stdout).is_dirty:
+    if self.__state_map.artifact_state(test.test_output_artifact).is_dirty:
       self.__test_queue.append(test)
     else:
-      self.__test_results.append((test.name, test, True))
+      self.__test_results.append((test.name, test))
 
   def build(self, action_runner):
     typecheck(action_runner, ActionRunner)
@@ -433,30 +409,41 @@ class Builder(object):
     while len(self.__test_queue) > 0:
       test = self.__test_queue.popleft()
 
-      result = action_runner.run(test.test_action)
-      if result:
-        print passmsg, test.name
-      else:
-        print failmsg, test.name
-        print " ", test.test_action.stdout.filename
+      if not action_runner.run(test.test_result_artifact.action):
+        # Command failed, die immediately.
+        return False
 
-      self.__test_results.append((test.name, test, result))
+      result = self.__root_dir.read(test.test_result_artifact.filename)
+
+      if result == "true":
+        print passmsg, test.name
+      elif result == "false":
+        print failmsg, test.name
+        print " ", test.test_output_artifact.filename
+      else:
+        raise DefinitionError("Test result is not true or false: %s" % test)
+
+      self.__test_results.append((test.name, test))
 
     self.__test_results.sort()
 
     print "\nTest results:"
 
     had_failure = False
-    for name, test, result in self.__test_results:
-      if result:
+    for name, test in self.__test_results:
+      result = self.__root_dir.read(test.test_result_artifact.filename)
+
+      if result == "true":
         indicator = passed
-      else:
+      elif result == "false":
         indicator = failed
         had_failure = True
+      else:
+        raise DefinitionError("Test result is not true or false: %s" % test)
 
       print "  %-70s %s" % (name, indicator)
 
       if not result:
-        print "   ", test.test_action.stdout.filename
+        print "   ", test.test_output_artifact.filename
 
     return not had_failure
