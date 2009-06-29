@@ -182,7 +182,7 @@ class SubprocessRunner(ActionRunner):
     typecheck(action, Action)
     if self.__use_color:
       self.__stdout.write(
-          "\033[34m%s:\033[0m %s\n" % (action.verb, action.name))
+          "\033[1;34m%s:\033[0m %s\n" % (action.verb, action.name))
     else:
       self.__stdout.write("%s: %s\n" % (action.verb, action.name))
 
