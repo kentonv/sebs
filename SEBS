@@ -49,6 +49,7 @@ sebs = python.Binary(
   srcs = [ "main.py" ],
   deps = [ sebs_lib ])
 
+command_test = python.Test("command_test.py", deps = [sebs_lib])
 core_test = python.Test("core_test.py", deps = [sebs_lib])
 filesystem_test = python.Test("filesystem_test.py", deps = [sebs_lib])
 helpers_test = python.Test("helpers_test.py", deps = [sebs_lib])
