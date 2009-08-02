@@ -1,0 +1,107 @@
+# Scalable Extendable Build System
+# Copyright (c) 2009 Kenton Varda and contributors.  All rights reserved.
+# Portions copyright Google, Inc.
+# http://code.google.com/p/sebs
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+#     * Redistributions of source code must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above
+# copyright notice, this list of conditions and the following disclaimer
+# in the documentation and/or other materials provided with the
+# distribution.
+#     * Neither the name of the SEBS project nor the names of its
+# contributors may be used to endorse or promote products derived from
+# this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import os.path
+
+# TODO(kenton):  Factor out common dependency handling code.
+
+class Library(sebs.Rule):
+  def __init__(self, srcs):
+    super(Library, self).__init__()
+    self.srcs = srcs
+
+  def _expand(self):
+    self.src_artifacts = []
+    for src in self.srcs:
+      self.src_artifacts.append(self.context.source_artifact(src))
+    self.outputs = []
+
+class Binary(sebs.Rule):
+  # TODO(kenton):  Rename "name" to "output", make it optional -- if not
+  #   given, use label and output only to tmp.
+  def __init__(self, name, main, srcs=[], deps=[]):
+    super(Binary, self).__init__()
+    self.binary_name = name
+    self.main = main
+    self.srcs = srcs
+    self.deps = deps
+
+  def _expand(self):
+    self.src_artifacts = []
+    for src in self.srcs:
+      self.src_artifacts.append(self.context.source_artifact(src))
+
+    transitive_sources = self.src_artifacts.copy()
+    for dep in self.deps:
+      if not isinstance(dep, Library):
+        raise DefinitionError("Dependency is not a Python library: %s" % dep)
+      dep.expand_once()
+      transitive_sources.extend(dep.src_artifacts)
+
+    make_bin = self.context.source_artifact("make_py_binary.py")
+    action = self.context.action(self, "par")
+    output = self.context.output_artifact("bin", self.binary_name, action)
+    action.set_command(
+      sebs.SubprocessCommand([make_bin, self.main, output] + transitive_sources,
+                             [make_bin] + transitive_sources,
+                             [output]))
+    self.outputs = [output]
+
+class Test(sebs.Test):
+  def __init__(self, main, deps = []):
+    super(Test, self).__init__()
+    self.main = main
+    self.deps = deps
+
+  def _expand(self):
+    main_artifact = self.context.source_artifact(self.main)
+    inputs = [main_artifact]
+    for dep in self.deps:
+      if not isinstance(dep, Library):
+        raise DefinitionError("Dependency is not a Python library: %s" % dep)
+      dep.expand_once()
+      inputs.extend(dep.src_artifacts)
+    action = self.context.action(self, "test", main_artifact.filename)
+
+    output = self.context.intermediate_artifact(
+      os.path.splitext(self.main)[0] + "_output.txt", action)
+    result = self.context.memory_artifact(
+      os.path.splitext(self.main)[0] + "_result", action)
+
+    action.set_command(sebs.SubprocessCommand(["python", main_artifact],
+                                              inputs, [],
+                                              capture_stdout = output,
+                                              capture_stderr = output,
+                                              capture_exit_status = result))
+
+    self.test_result_artifact = result
+    self.test_output_artifact = output
+    self.outputs = []
