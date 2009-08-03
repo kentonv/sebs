@@ -159,6 +159,12 @@ mock_test = sebs.Test()
     self.assertEqual("src/foo/qux", artifact1.filename)
     self.assertTrue(artifact1.action is None)
     self.assertFalse(artifact2 is artifact1)
+    self.assertTrue(self.context.source_artifact(artifact1) is artifact1)
+
+    self.assertEqual("qux", self.context.local_filename(artifact1))
+    self.assertEqual("corge", self.context.local_filename(artifact2))
+    self.assertEqual("qux", self.context.local_filename("qux"))
+    self.assertEqual("corge", self.context.local_filename("corge"))
 
     # Trying to create an artifact outside the directory fails.
     self.assertRaises(DefinitionError,
@@ -184,14 +190,17 @@ mock_test = sebs.Test()
     tmp_artifact = self.context.intermediate_artifact("grault", action)
     self.assertEqual("tmp/foo/grault", tmp_artifact.filename)
     self.assertTrue(tmp_artifact.action is action)
+    self.assertEqual("grault", self.context.local_filename(tmp_artifact))
 
     mem_artifact = self.context.memory_artifact("plugh", action)
     self.assertEqual("mem/foo/plugh", mem_artifact.filename)
     self.assertTrue(mem_artifact.action is action)
+    self.assertEqual("plugh", self.context.local_filename(mem_artifact))
 
     bin_artifact = self.context.output_artifact("bin", "garply", action)
     self.assertEqual("bin/garply", bin_artifact.filename)
     self.assertTrue(bin_artifact.action is action)
+    self.assertTrue(self.context.local_filename(bin_artifact) is None)
 
     # Creating the same temporary artifact twice fails.
     self.assertRaises(DefinitionError,

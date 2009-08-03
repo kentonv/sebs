@@ -47,7 +47,24 @@ class _ContextImpl(Context):
     self.directory = os.path.dirname(filename)
     self.timestamp = root_dir.getmtime(self.full_filename)
 
+  def local_filename(self, artifact):
+    if isinstance(artifact, str):
+      return artifact
+    typecheck(artifact, Artifact)
+
+    parts = artifact.filename.split("/")
+    if parts[0] not in ["src", "tmp", "mem"]:
+      return None
+
+    parts = parts[1:]
+    dir_parts = self.directory.split("/")
+    if len(parts) < len(dir_parts) or parts[:len(dir_parts)] != dir_parts:
+      return None
+    return "/".join(parts[len(dir_parts):])
+
   def source_artifact(self, filename):
+    if isinstance(filename, Artifact):
+      return filename
     self.__validate_artifact_name(filename)
 
     return self.__loader.source_artifact(

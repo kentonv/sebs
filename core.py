@@ -187,10 +187,24 @@ class Context(object):
 
     return Context.__current_context
 
+  def local_filename(self, artifact):
+    """Given an artifact, returns its package-relative filename, or None if
+    it is not in this package.  Thus, given an artifact returned by
+    source_artifact(), intermediate_artifact(), or memory_artifact(), this
+    will return the original filename passed to the corresponding method.  As
+    a convenience, if the parameter is a string, it is returned verbatim --
+    this means that you can call local_filename() on inputs provided by the
+    user which may be either file names or artifacts."""
+
+    raise NotImplementedError
+
   def source_artifact(self, filename):
     """Returns an Artifact representing a source file.  The filename must be
     given relative to the directory containing the SEBS file.  If called
-    multiple times with the same file, the same Artifact object is returned."""
+    multiple times with the same file, the same Artifact object is returned.
+    As a convenience, if the parameter is actually an Artifact, it is simply
+    returned verbatim -- this is usually what you want when the user specified
+    an Artifact where a source file name was expected."""
 
     raise NotImplementedError
 

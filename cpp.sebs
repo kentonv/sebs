@@ -61,9 +61,30 @@ cflags = _EnvironmentOption("CFLAGS", "-O2 -g", "C compiler flags")
 cxxflags = _EnvironmentOption("CXXFLAGS", cflags, "C++ compiler flags")
 ldflags = _EnvironmentOption("LDFLAGS", "", "linker flags")
 
+class SystemLibrary(sebs.Rule):
+  def __init__(self, name, deps = []):
+    super(SystemLibrary, self).__init__()
+    self.lib = name
+    self.deps = deps
+
+  def _expand(self):
+    self.outputs = []
+    self.transitive_libs = set()
+
+    for dep in self.deps:
+      if not isinstance(dep, SystemLibrary):
+        raise sebs.DefinitionError(
+          "Dependency of system library is not a system library: %s" % dep)
+      dep.expand_once()
+      self.transitive_libs.add(dep.lib)
+      self.transitive_libs.update(dep.transitive_libs)
+
+  def as_cpp_library(self):
+    return self
+
 class _Base(sebs.Rule):
-  def __init__(self, srcs, deps):
-    super(_Base, self).__init__()
+  def __init__(self, srcs, deps, context = None):
+    super(_Base, self).__init__(context = context)
     self.srcs = srcs
     self.deps = deps
 
@@ -76,7 +97,11 @@ class _Base(sebs.Rule):
     self.objects = []
     for src in self.srcs:
       src_artifact = self.context.source_artifact(src)
-      name, ext = os.path.splitext(src)
+      src_filename = self.context.local_filename(src)
+      if src_filename is None:
+        raise sebs.DefinitionError(
+          "Source file is not in this package: %s" % src)
+      name, ext = os.path.splitext(src_filename)
       if ext in [".c", ".C", ".cc", ".cpp", ".cxx", ".c++"]:
         action = self.context.action(self, "compile", src_artifact.filename)
         obj = self.context.intermediate_artifact(name + ".o", action)
@@ -91,27 +116,35 @@ class _Base(sebs.Rule):
           "File extension not recognized as a C++ source or header: %s" % src)
 
     self.transitive_deps = set()
+    self.transitive_libs = set()
     for dep in self.deps:
-      if not isinstance(dep, Library):
+      dep = dep.as_cpp_library()
+      if isinstance(dep, SystemLibrary):
+        dep.expand_once()
+        self.transitive_libs.add(dep.lib)
+        self.transitive_libs.update(dep.transitive_libs)
+      elif isinstance(dep, Library):
+        dep.expand_once()
+        self.transitive_deps.add(dep.static_library)
+        self.transitive_deps.update(dep.transitive_deps)
+        self.transitive_libs.update(dep.transitive_libs)
+      else:
         raise sebs.DefinitionError(
           "Dependency of C++ rule is not a C++ library: %s" % dep)
-      dep.expand_once()
-      self.transitive_deps.add(dep.static_library)
-      self.transitive_deps.update(dep.transitive_deps)
 
   def anonymous_name(self):
     if self.label is None:
       # Create a stable, unique temporary name for the library.
       input_digest = md5.new()
       for src in self.srcs:
-        input_digest.update(src)
+        input_digest.update(self.context.local_filename(src))
       return input_digest.hexdigest()[-8:]
     else:
       return self.label
 
 class Library(_Base):
-  def __init__(self, name=None, srcs=[], deps=[]):
-    super(Library, self).__init__(srcs, deps)
+  def __init__(self, name=None, srcs=[], deps=[], context = None):
+    super(Library, self).__init__(srcs, deps, context = context)
     self.output_name = name
 
   def _expand(self):
@@ -142,6 +175,9 @@ class Library(_Base):
     self.static_library = static_lib
     self.outputs = [static_lib]
 
+  def as_cpp_library(self):
+    return self
+
 class Binary(_Base):
   def __init__(self, name=None, srcs=[], deps=[]):
     super(Binary, self).__init__(srcs, deps)
@@ -161,9 +197,11 @@ class Binary(_Base):
       output = self.context.output_artifact(
           "bin", self.output_name, link_action)
 
+    lib_flags = ["-l" + lib for lib in self.transitive_libs]
+
     link_action.set_command(
-      sebs.SubprocessCommand(["c++", "-o", output] + all_inputs,
-                             all_inputs, [output]))
+      sebs.SubprocessCommand([cxx.value, "-o", output] + all_inputs + lib_flags,
+                             all_inputs + [cxx.output], [output]))
 
     self.binary = output
     self.outputs = [output]

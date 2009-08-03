@@ -311,7 +311,9 @@ class SubprocessCommand(Command):
 
     # Capture stdout/stderr if requested.
     if self.__capture_stdout is None:
-      stdout = log
+      # TODO(kenton):  This should be "stdout = log" but this seems to cause
+      #   the output to simply be lost.  Investigate.
+      stdout = None
     else:
       disk_path = context.get_disk_path(self.__capture_stdout,
                                         use_temporary = False)
@@ -320,10 +322,10 @@ class SubprocessCommand(Command):
       else:
         stdout = open(disk_path, "wb")
 
-    if self.__capture_stderr is None:
-      stderr = log
-    elif self.__capture_stderr is self.__capture_stdout:
+    if self.__capture_stderr is self.__capture_stdout:
       stderr = subprocess.STDOUT
+    elif self.__capture_stderr is None:
+      stderr = log
     else:
       disk_path = context.get_disk_path(self.__capture_stderr,
                                         use_temporary = False)
