@@ -94,9 +94,11 @@ class DryRunner(ActionRunner):
         raise AssertionError("Invalid argument.")
 
 class _CommandContextImpl(CommandContext):
-  def __init__(self, working_dir):
+  def __init__(self, working_dir, verbose, use_color):
     self.__working_dir = working_dir
     self.__temp_files_for_mem = {}
+    self.__verbose = verbose
+    self.__use_color = use_color
 
   def get_disk_path(self, artifact, use_temporary=True):
     filename = artifact.filename
@@ -146,6 +148,8 @@ class _CommandContextImpl(CommandContext):
       return None
 
   def subprocess(self, args, **kwargs):
+    if self.__verbose:
+      print " ", " ".join(args)
     if "stdin" in kwargs and isinstance(kwargs["stdin"], str):
       stdin_str = kwargs["stdin"]
       kwargs["stdin"] = subprocess.PIPE
@@ -154,6 +158,11 @@ class _CommandContextImpl(CommandContext):
     proc = subprocess.Popen(args, **kwargs)
     stdout_str, stderr_str = proc.communicate(stdin_str)
     return (proc.returncode, stdout_str, stderr_str)
+
+  def message(self, text):
+    if self.__use_color:
+      text = "\033[34m%s\033[0m" % text
+    print " ", text
 
   def resolve_mem_files(self):
     for (filename, diskfile) in self.__temp_files_for_mem.items():
@@ -166,7 +175,7 @@ class _CommandContextImpl(CommandContext):
 class SubprocessRunner(ActionRunner):
   """An ActionRunner which actually executes the commands."""
 
-  def __init__(self, working_dir, stdout):
+  def __init__(self, working_dir, stdout, verbose = False):
     super(SubprocessRunner, self).__init__()
 
     self.__env = os.environ.copy()
@@ -174,6 +183,7 @@ class SubprocessRunner(ActionRunner):
     self.__stdout = stdout
     self.__use_color = self.__stdout.isatty()
     self.__temp_files_for_mem = {}
+    self.__verbose = verbose
 
     # TODO(kenton):  We should *add* src to the existing PYTHONPATH instead of
     #   overwrite, but there is one problem:  The SEBS Python archive may be
@@ -194,7 +204,8 @@ class SubprocessRunner(ActionRunner):
     for output in outputs:
       self.__working_dir.mkdir(os.path.dirname(output.filename))
 
-    context = _CommandContextImpl(self.__working_dir)
+    context = _CommandContextImpl(
+        self.__working_dir, self.__verbose, self.__use_color)
     try:
       if not action.command.run(context, sys.stderr):
         context.resolve_mem_files()

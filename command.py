@@ -71,6 +71,11 @@ class CommandContext(object):
     corresponding parameters, or None otherwise."""
     raise NotImplementedError
 
+  def message(self, text):
+    """Provides a message to be printed to the console reporting the result
+    of this action."""
+    raise NotImplementedError
+
 class ArtifactEnumerator(object):
   def add_input(self, artifact):
     """Report that the given artifact is an input to the command."""
@@ -146,13 +151,15 @@ class EnvironmentCommand(Command):
   The default value may be a simple string or it may be another artifact -- in
   the latter case, the artifact's contents are copied into the output."""
 
-  def __init__(self, env_name, output_artifact, default=None):
+  def __init__(self, env_name, output_artifact, default=None,
+               output_message=False):
     typecheck(env_name, str)
     typecheck(output_artifact, Artifact)
     typecheck(default, [str, Artifact])
     self.__env_name = env_name
     self.__output_artifact = output_artifact
     self.__default = default
+    self.__output_message = output_message
 
   def enumerate_artifacts(self, artifact_enumerator):
     typecheck(artifact_enumerator, ArtifactEnumerator)
@@ -174,6 +181,8 @@ class EnvironmentCommand(Command):
       else:
         value = self.__default
     context.write(self.__output_artifact, value)
+    if self.__output_message:
+      context.message(value)
     return True
 
   def print_(self, output):

@@ -120,18 +120,21 @@ def _args_to_rules(loader, args):
 
 def build(root_dir, argv):
   try:
-    opts, args = getopt.getopt(argv[1:], "", ["dry"])
+    opts, args = getopt.getopt(argv[1:], "v", ["dry"])
   except getopt.error, message:
     raise UsageError(message)
 
   runner = None
+  verbose = False
 
   for name, value in opts:
     if name == "--dry":
       runner = DryRunner(sys.stdout)
+    elif name == "-v":
+      verbose = True
 
   if runner is None:
-    runner = SubprocessRunner(root_dir, sys.stdout)
+    runner = SubprocessRunner(root_dir, sys.stdout, verbose)
 
   loader = Loader(root_dir)
   builder = Builder(root_dir)
