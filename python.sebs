@@ -70,9 +70,8 @@ class Binary(sebs.Rule):
     action = self.context.action(self, "par")
     output = self.context.output_artifact("bin", self.binary_name, action)
     action.set_command(
-      sebs.SubprocessCommand([make_bin, self.main, output] + transitive_sources,
-                             [make_bin] + transitive_sources,
-                             [output]))
+      sebs.SubprocessCommand(action,
+        [make_bin, self.main, output] + transitive_sources))
     self.outputs = [output]
 
 class Test(sebs.Test):
@@ -96,8 +95,7 @@ class Test(sebs.Test):
     result = self.context.memory_artifact(
       os.path.splitext(self.main)[0] + "_result", action)
 
-    action.set_command(sebs.SubprocessCommand(["python", main_artifact],
-                                              inputs, [],
+    action.set_command(sebs.SubprocessCommand(action, ["python", main_artifact],
                                               capture_stdout = output,
                                               capture_stderr = output,
                                               capture_exit_status = result))

@@ -34,7 +34,7 @@ import cStringIO
 import subprocess
 import unittest
 
-from sebs.core import Artifact, DefinitionError, ContentToken
+from sebs.core import Artifact, Action, DefinitionError, ContentToken
 from sebs.command import CommandContext, ArtifactEnumerator, Command, \
                          EchoCommand, EnvironmentCommand, DoAllCommand, \
                          ConditionalCommand, SubprocessCommand
@@ -381,50 +381,52 @@ class CommandTest(unittest.TestCase):
 
 class SubprocessCommandTest(unittest.TestCase):
   def setUp(self):
+    self.__action = Action(None, "dummy", "dummy")
     self.__artifact = Artifact("filename", None)
     self.__dir = VirtualDirectory()
 
   def testVerifyArgs(self):
+    action = self.__action
     artifact = self.__artifact
 
-    self.assertRaises(TypeError, SubprocessCommand, [0], [], [])
-    self.assertRaises(DefinitionError, SubprocessCommand, [artifact], [], [])
-    self.assertRaises(DefinitionError, SubprocessCommand, [[artifact]], [], [])
-    self.assertRaises(DefinitionError, SubprocessCommand,
-                      [artifact.contents()], [], [])
-    self.assertRaises(DefinitionError, SubprocessCommand,
-                      [artifact.contents()], [], [artifact])
+    self.assertRaises(TypeError, SubprocessCommand, action, [0])
+    self.assertRaises(TypeError, SubprocessCommand, action, [[0]])
+    self.assertRaises(TypeError, SubprocessCommand, action, [artifact, 0])
 
-    SubprocessCommand(["foo"], [], [])
-    SubprocessCommand([artifact], [artifact], [])
-    SubprocessCommand([artifact], [], [artifact])
-    SubprocessCommand([[artifact]], [artifact], [])
-    SubprocessCommand([[artifact]], [], [artifact])
-    SubprocessCommand([artifact.contents()], [artifact], [])
+    SubprocessCommand(action, ["foo"])
+    SubprocessCommand(action, [artifact])
+    SubprocessCommand(action, [artifact])
+    SubprocessCommand(action, [[artifact]])
+    SubprocessCommand(action, [[artifact]])
+    SubprocessCommand(action, [artifact.contents()])
 
   def testEnumerateArtifacts(self):
-    inputs = [ Artifact("input1", None), Artifact("input2", None) ]
-    outputs = [ Artifact("output1", None), Artifact("output2", None) ]
+    action = self.__action
 
-    command = SubprocessCommand([], inputs, outputs)
+    inputs = [ Artifact("input1", None), Artifact("input2", None) ]
+    outputs = [ Artifact("output1", action), Artifact("output2", action) ]
+
+    command = SubprocessCommand(action, ["foo", inputs[0], outputs[0]],
+                                implicit = [inputs[1], outputs[1]])
     enumerator = MockArtifactEnumerator()
     command.enumerate_artifacts(enumerator)
     self.assertEquals([], enumerator.reads)
-    self.assertEquals(inputs, enumerator.inputs)
-    self.assertEquals(outputs, enumerator.outputs)
+    self.assertEquals(set(inputs), set(enumerator.inputs))
+    self.assertEquals(set(outputs), set(enumerator.outputs))
 
     stdout = Artifact("stdout", None)
     stderr = Artifact("stderr", None)
     exit_code = Artifact("error_code", None)
-    command = SubprocessCommand([], inputs, outputs,
+    command = SubprocessCommand(action, inputs + outputs,
                                 capture_stdout = stdout,
                                 capture_stderr = stderr,
                                 capture_exit_status = exit_code)
     enumerator = MockArtifactEnumerator()
     command.enumerate_artifacts(enumerator)
     self.assertEquals([], enumerator.reads)
-    self.assertEquals(inputs, enumerator.inputs)
-    self.assertEquals(outputs + [stdout, stderr, exit_code], enumerator.outputs)
+    self.assertEquals(set(inputs), set(enumerator.inputs))
+    self.assertEquals(set(outputs + [stdout, stderr, exit_code]),
+                      set(enumerator.outputs))
 
   def testFormatArgs(self):
     artifact = self.__artifact
@@ -461,7 +463,7 @@ class SubprocessCommandTest(unittest.TestCase):
 
   def assertFormattedAs(self, args, result, printed = None):
     context = MockCommandContext(self.__dir, diskpath_prefix = "disk/")
-    command = SubprocessCommand(list(args), [self.__artifact], [])
+    command = SubprocessCommand(self.__action, list(args))
     self.assertTrue(command.run(context, cStringIO.StringIO()))
     self.assertEquals(result, context.subprocess_args)
 
@@ -471,7 +473,7 @@ class SubprocessCommandTest(unittest.TestCase):
 
   def testRedirectStreams(self):
     # No redirection.
-    command = SubprocessCommand(["foo"], [], [])
+    command = SubprocessCommand(self.__action, ["foo"])
     context = MockCommandContext(self.__dir)
     log = cStringIO.StringIO()
     self.assertTrue(command.run(context, log))
@@ -482,7 +484,7 @@ class SubprocessCommandTest(unittest.TestCase):
     self.assertEquals("foo\n", _print_command(command))
 
     # Redirect stdout.
-    command = SubprocessCommand(["foo"], [], [],
+    command = SubprocessCommand(self.__action, ["foo"],
                                 capture_stdout = self.__artifact)
     context = MockCommandContext(self.__dir)
     context.subprocess_result = (0, "some text", None)
@@ -494,7 +496,7 @@ class SubprocessCommandTest(unittest.TestCase):
     self.assertEquals("foo > filename\n", _print_command(command))
 
     # Redirect stderr.
-    command = SubprocessCommand(["foo"], [], [],
+    command = SubprocessCommand(self.__action, ["foo"],
                                 capture_stderr = self.__artifact)
     context = MockCommandContext(self.__dir)
     context.subprocess_result = (0, None, "error text")
@@ -508,7 +510,7 @@ class SubprocessCommandTest(unittest.TestCase):
     self.assertEquals("foo 2> filename\n", _print_command(command))
 
     # Redirect both.
-    command = SubprocessCommand(["foo"], [], [],
+    command = SubprocessCommand(self.__action, ["foo"],
                                 capture_stdout = self.__artifact,
                                 capture_stderr = Artifact("file2", None))
     context = MockCommandContext(self.__dir)
@@ -522,7 +524,7 @@ class SubprocessCommandTest(unittest.TestCase):
     self.assertEquals("foo > filename 2> file2\n", _print_command(command))
 
     # Redirect both to same destination.
-    command = SubprocessCommand(["foo"], [], [],
+    command = SubprocessCommand(self.__action, ["foo"],
                                 capture_stdout = self.__artifact,
                                 capture_stderr = self.__artifact)
     context = MockCommandContext(self.__dir)
@@ -535,7 +537,7 @@ class SubprocessCommandTest(unittest.TestCase):
     self.assertEquals("foo > filename 2>&1\n", _print_command(command))
 
   def testExitStatus(self):
-    command = SubprocessCommand(["foo"], [], [])
+    command = SubprocessCommand(self.__action, ["foo"])
 
     context = MockCommandContext(self.__dir)
     context.subprocess_result = (0, None, None)
@@ -550,7 +552,7 @@ class SubprocessCommandTest(unittest.TestCase):
     self.assertFalse(command.run(context, cStringIO.StringIO()))
 
     # Redirect exit status.
-    command = SubprocessCommand(["foo"], [], [],
+    command = SubprocessCommand(self.__action, ["foo"],
                                 capture_exit_status = self.__artifact)
     self.assertEquals("foo && echo true > filename || echo false > filename\n",
                       _print_command(command))

@@ -36,12 +36,13 @@ python = _sebs.import_("python.sebs")
 
 sebs_lib = python.Library([
   "__init__.py",
+  "builder.py",
+  "command.py",
   "core.py",
   "filesystem.py",
   "helpers.py",
   "loader.py",
-  "builder.py",
-  "main.py"])
+  "make_py_binary.py"])
 
 sebs = python.Binary(
   name = "sebs",
@@ -73,7 +74,7 @@ class ShellTest(_sebs.Test):
       os.path.splitext(self.src)[0] + "_result", action)
 
     action.set_command(
-        _sebs.SubprocessCommand([main_artifact], [main_artifact], [],
+        _sebs.SubprocessCommand(action, [main_artifact],
                                 capture_stdout = output,
                                 capture_stderr = output,
                                 capture_exit_status = result))

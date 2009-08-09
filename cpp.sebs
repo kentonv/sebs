@@ -107,10 +107,10 @@ class _Base(sebs.Rule):
         obj = self.context.intermediate_artifact(name + ".o", action)
         self.objects.append(obj)
         action.set_command(
-          sebs.SubprocessCommand([cxx.value, cxxflags.value,
+          sebs.SubprocessCommand(action,
+                                 [cxx.value, cxxflags.value,
                                   "-Isrc", "-Itmp", "-Iinclude",
-                                  "-c", src_artifact, "-o", obj],
-                                  env_artifacts + [src_artifact], [obj]))
+                                  "-c", src_artifact, "-o", obj]))
       elif ext not in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
         raise sebs.DefinitionError(
           "File extension not recognized as a C++ source or header: %s" % src)
@@ -164,11 +164,11 @@ class Library(_Base):
     # Remove existing library, since we don't know if it was created with the
     # same set of sources.  It appears the "ar" command does not have any
     # option for "remove any files that aren't in the list".
-    rm = sebs.SubprocessCommand(["rm", "-f", static_lib], [], [static_lib])
+    rm = sebs.SubprocessCommand(static_link_action, ["rm", "-f", static_lib])
 
     # Create the library archive, with a symbol table.
-    ar = sebs.SubprocessCommand(["ar", "-qcs", static_lib] + self.objects,
-                                self.objects, [static_lib])
+    ar = sebs.SubprocessCommand(static_link_action,
+                                ["ar", "-qcs", static_lib] + self.objects)
 
     static_link_action.set_command(sebs.DoAllCommand([rm, ar]))
 
@@ -200,8 +200,8 @@ class Binary(_Base):
     lib_flags = ["-l" + lib for lib in self.transitive_libs]
 
     link_action.set_command(
-      sebs.SubprocessCommand([cxx.value, "-o", output] + all_inputs + lib_flags,
-                             all_inputs + [cxx.output], [output]))
+      sebs.SubprocessCommand(link_action,
+        [cxx.value, "-o", output] + all_inputs + lib_flags))
 
     self.binary = output
     self.outputs = [output]
@@ -221,8 +221,7 @@ class Test(sebs.Test):
     result = self.context.memory_artifact(
         "%s_result" % self.__binary_rule.anonymous_name(), action)
     action.set_command(
-        sebs.SubprocessCommand([self.__binary_rule.binary],
-                               [self.__binary_rule.binary], [],
+        sebs.SubprocessCommand(action, [self.__binary_rule.binary],
                                capture_stdout = output,
                                capture_stderr = output,
                                capture_exit_status = result))
