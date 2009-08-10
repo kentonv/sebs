@@ -33,45 +33,57 @@ import os.path
 import md5
 
 class _EnvironmentOption(sebs.Rule):
-  def __init__(self, env_name, default, description):
-    super(_EnvironmentOption, self).__init__()
-    self.__env_name = env_name
-    self.__description = description
-    self.__default = default
+  argument_spec = sebs.ArgumentSpec(
+      env_name = str,
+      default = (str, ""),
+      default_copy_from = (sebs.Rule, None),
+      description = (str, ""))
 
-  def _expand(self):
-    action = self.context.action(self, "configure", self.__description)
-    output = self.context.memory_artifact(self.__env_name, action)
+  def _expand(self, args):
+    if args.description == "":
+      description = args.env_name
+    else:
+      description = args.description
 
-    default = self.__default
+    action = self.context.action(self, "configure", description)
+    output = self.context.memory_artifact(args.env_name, action)
+
+    default = args.default
     if isinstance(default, _EnvironmentOption):
       default.expand_once()
       default = default.output
 
     action.set_command(sebs.EnvironmentCommand(
-        self.__env_name, output, default, output_message=True))
+        args.env_name, output, default, output_message=True))
 
     self.value = output.contents()
     self.output = output
     self.outputs = [output]
 
-cc = _EnvironmentOption("CC", "cc", "C compiler")
-cxx = _EnvironmentOption("CXX", "c++", "C++ compiler")
-cflags = _EnvironmentOption("CFLAGS", "-O2 -g", "C compiler flags")
-cxxflags = _EnvironmentOption("CXXFLAGS", cflags, "C++ compiler flags")
-ldflags = _EnvironmentOption("LDFLAGS", "", "linker flags")
+def _option(env_name, default, description):
+  if isinstance(default, _EnvironmentOption):
+    return _EnvironmentOption(env_name = env_name, default_copy_from = default,
+                              description = description)
+  else:
+    return _EnvironmentOption(env_name = env_name, default = default,
+                              description = description)
+
+cc       = _option("CC"      , "cc"    , "C compiler"        )
+cxx      = _option("CXX"     , "c++"   , "C++ compiler"      )
+cflags   = _option("CFLAGS"  , "-O2 -g", "C compiler flags"  )
+cxxflags = _option("CXXFLAGS", cflags  , "C++ compiler flags")
+ldflags  = _option("LDFLAGS" , ""      , "linker flags"      )
 
 class SystemLibrary(sebs.Rule):
-  def __init__(self, name, deps = []):
-    super(SystemLibrary, self).__init__()
-    self.lib = name
-    self.deps = deps
+  argument_spec = sebs.ArgumentSpec(name = str,
+                                    deps = ([sebs.Artifact], []))
 
-  def _expand(self):
+  def _expand(self, args):
+    self.lib = args.name
     self.outputs = []
     self.transitive_libs = set()
 
-    for dep in self.deps:
+    for dep in args.deps:
       if not isinstance(dep, SystemLibrary):
         raise sebs.DefinitionError(
           "Dependency of system library is not a system library: %s" % dep)
@@ -83,19 +95,19 @@ class SystemLibrary(sebs.Rule):
     return self
 
 class _Base(sebs.Rule):
-  def __init__(self, srcs, deps, context = None):
-    super(_Base, self).__init__(context = context)
-    self.srcs = srcs
-    self.deps = deps
+  argument_spec = sebs.ArgumentSpec(srcs = [sebs.Artifact],
+                                    deps = ([sebs.Rule], []))
 
-  def _expand(self):
+  def _expand(self, args):
+    self.__srcs = args.srcs
+
     env_vars = [cxx, cflags, cxxflags]
     for rule in env_vars:
       rule.expand_once()
     env_artifacts = [env.output for env in env_vars]
 
     self.objects = []
-    for src in self.srcs:
+    for src in args.srcs:
       src_artifact = self.context.source_artifact(src)
       src_filename = self.context.local_filename(src)
       if src_filename is None:
@@ -117,7 +129,7 @@ class _Base(sebs.Rule):
 
     self.transitive_deps = set()
     self.transitive_libs = set()
-    for dep in self.deps:
+    for dep in args.deps:
       dep = dep.as_cpp_library()
       if isinstance(dep, SystemLibrary):
         dep.expand_once()
@@ -136,30 +148,28 @@ class _Base(sebs.Rule):
     if self.label is None:
       # Create a stable, unique temporary name for the library.
       input_digest = md5.new()
-      for src in self.srcs:
+      for src in self.__srcs:
         input_digest.update(self.context.local_filename(src))
       return input_digest.hexdigest()[-8:]
     else:
       return self.label
 
 class Library(_Base):
-  def __init__(self, name=None, srcs=[], deps=[], context = None):
-    super(Library, self).__init__(srcs, deps, context = context)
-    self.output_name = name
+  argument_spec = _Base.argument_spec.extend(name = (str, None))
 
-  def _expand(self):
-    super(Library, self)._expand()
+  def _expand(self, args):
+    super(Library, self)._expand(args)
 
     static_link_action = self.context.action(self, "link")
 
-    if self.output_name is None:
+    if args.name is None:
       # Output library to intermediate directory.
       static_lib = self.context.intermediate_artifact(
           "lib%s.a" % self.anonymous_name(), static_link_action)
     else:
       # Output library to lib directory.
       static_lib = self.context.output_artifact(
-          "lib", "lib%s.a" % self.output_name, static_link_action)
+          "lib", "lib%s.a" % args.name, static_link_action)
 
     # Remove existing library, since we don't know if it was created with the
     # same set of sources.  It appears the "ar" command does not have any
@@ -179,23 +189,21 @@ class Library(_Base):
     return self
 
 class Binary(_Base):
-  def __init__(self, name=None, srcs=[], deps=[]):
-    super(Binary, self).__init__(srcs, deps)
-    self.output_name = name
+  argument_spec = _Base.argument_spec.extend(name = (str, None))
 
-  def _expand(self):
-    super(Binary, self)._expand()
+  def _expand(self, args):
+    super(Binary, self)._expand(args)
 
     all_inputs = self.objects + list(self.transitive_deps)
     link_action = self.context.action(self, "link")
 
-    if self.output_name is None:
+    if args.name is None:
       # Output binary to intermediate directory.
       output = self.context.intermediate_artifact(
           "%s_bin" % self.anonymous_name(), link_action)
     else:
       output = self.context.output_artifact(
-          "bin", self.output_name, link_action)
+          "bin", args.name, link_action)
 
     lib_flags = ["-l" + lib for lib in self.transitive_libs]
 
@@ -207,11 +215,10 @@ class Binary(_Base):
     self.outputs = [output]
 
 class Test(sebs.Test):
-  def __init__(self, srcs=[], deps=[]):
-    super(Test, self).__init__()
-    self.__binary_rule = Binary(None, srcs, deps)
+  argument_spec = _Base.argument_spec
 
-  def _expand(self):
+  def _expand(self, args):
+    self.__binary_rule = Binary(context = self.context, **args.__dict__)
     self.__binary_rule.label = self.label
     self.__binary_rule.expand_once()
 

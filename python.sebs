@@ -34,68 +34,56 @@ import os.path
 # TODO(kenton):  Factor out common dependency handling code.
 
 class Library(sebs.Rule):
-  def __init__(self, srcs):
-    super(Library, self).__init__()
-    self.srcs = srcs
+  argument_spec = sebs.ArgumentSpec(srcs = [sebs.Artifact])
 
-  def _expand(self):
-    self.src_artifacts = []
-    for src in self.srcs:
-      self.src_artifacts.append(self.context.source_artifact(src))
+  def _expand(self, args):
+    self.srcs = args.srcs
     self.outputs = []
 
 class Binary(sebs.Rule):
   # TODO(kenton):  Rename "name" to "output", make it optional -- if not
   #   given, use label and output only to tmp.
-  def __init__(self, name, main, srcs=[], deps=[]):
-    super(Binary, self).__init__()
-    self.binary_name = name
-    self.main = main
-    self.srcs = srcs
-    self.deps = deps
+  argument_spec = sebs.ArgumentSpec(name = str, main = str,
+                                    srcs = [sebs.Artifact],
+                                    deps = ([sebs.Rule], []))
 
-  def _expand(self):
-    self.src_artifacts = []
-    for src in self.srcs:
-      self.src_artifacts.append(self.context.source_artifact(src))
-
-    transitive_sources = self.src_artifacts.copy()
-    for dep in self.deps:
+  def _expand(self, args):
+    transitive_sources = args.srcs.copy()
+    for dep in args.deps:
       if not isinstance(dep, Library):
         raise DefinitionError("Dependency is not a Python library: %s" % dep)
       dep.expand_once()
-      transitive_sources.extend(dep.src_artifacts)
+      transitive_sources.extend(dep.srcs)
 
     make_bin = self.context.source_artifact("make_py_binary.py")
     action = self.context.action(self, "par")
-    output = self.context.output_artifact("bin", self.binary_name, action)
+    output = self.context.output_artifact("bin", args.name, action)
     action.set_command(
       sebs.SubprocessCommand(action,
-        [make_bin, self.main, output] + transitive_sources))
+        [make_bin, args.main, output] + transitive_sources))
     self.outputs = [output]
 
 class Test(sebs.Test):
-  def __init__(self, main, deps = []):
-    super(Test, self).__init__()
-    self.main = main
-    self.deps = deps
+  argument_spec = sebs.ArgumentSpec(main = sebs.Artifact,
+                                    deps = ([sebs.Rule], []))
 
-  def _expand(self):
-    main_artifact = self.context.source_artifact(self.main)
-    inputs = [main_artifact]
-    for dep in self.deps:
+  def _expand(self, args):
+    implicit = []
+    for dep in args.deps:
       if not isinstance(dep, Library):
         raise DefinitionError("Dependency is not a Python library: %s" % dep)
       dep.expand_once()
-      inputs.extend(dep.src_artifacts)
-    action = self.context.action(self, "test", main_artifact.filename)
+      implicit.extend(dep.srcs)
+    action = self.context.action(self, "test", args.main.filename)
+    main_name = self.context.local_filename(args.main)
 
     output = self.context.intermediate_artifact(
-      os.path.splitext(self.main)[0] + "_output.txt", action)
+      os.path.splitext(main_name)[0] + "_output.txt", action)
     result = self.context.memory_artifact(
-      os.path.splitext(self.main)[0] + "_result", action)
+      os.path.splitext(main_name)[0] + "_result", action)
 
-    action.set_command(sebs.SubprocessCommand(action, ["python", main_artifact],
+    action.set_command(sebs.SubprocessCommand(action, ["python", args.main],
+                                              implicit = implicit,
                                               capture_stdout = output,
                                               capture_stderr = output,
                                               capture_exit_status = result))

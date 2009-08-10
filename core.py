@@ -256,6 +256,115 @@ class Context(object):
 
     raise NotImplementedError
 
+class _RuleArgs(object):
+  """Dummy class.  See below."""
+  pass
+
+class ArgumentSpec(object):
+  """Used to specify the arguments accepted by a function, usually a constructor
+  for a subclass of Rule.  ArgumentSpec allows you to specify a set of parameter
+  names and types with simple syntax:
+
+    spec = ArgumentSpec(
+        foo = str,        # "foo" is a required argument of type string.
+        bar = [int],      # "bar" is a required list of integers.
+        baz = (int, 12))  # "baz" is an optional integer that defaults to 12.
+
+    def some_function(**kwargs):
+      # Validate the arguments.  Throws TypeError if anything is wrong.
+      # Returns an object whose attributes are the arguments.
+      args = spec.validate("some_function", context, kwargs)
+
+      do_something(args.foo, args.bar, args.baz)
+
+    # Valid calls to some_function.
+    some_function(foo = "hello", bar = [1, 3], baz = 42)
+    some_function(foo = "world", bar = [])
+
+    # INVALID calls -- these throw exceptions.
+    some_function(foo = "bad")               # Missing required attribute "bar".
+    some_function(foo = 123, bar = [])       # "foo" has wrong type.
+    some_function(foo = "x", bar = ["str"])  # "bar" has element of wrong type.
+    some_function(foo="", bar=[], qux = 1)   # "qux" is not an allowed argument.
+
+  As you can see from the example, each argument to ArgumentSpec's constructor
+  corresponds to one of the arguments that will be accepted by validate().  The
+  value of each constructor argument is a type or a tuple.  If it is a type,
+  then the argument is required and must be an instance of that type.  If it is
+  a tuple, then the first element of the tuple is the type and the second
+  element is the default value; if the argument is omitted, the default will be
+  used.  Additionally, instead of a type you may specify a list with one
+  element, where that element is a type.  This says that the argument must be a
+  list of values of that type.
+
+  ArgumentSpec treats the "Artifact" type specially:  the caller is allowed to
+  pass either an actual Artifact object or a string.  In the latter case, the
+  string is interpreted as a source file name in the current package.
+  ArgumentSpec.validate() automatically passes such strings to
+  context.source_artifact() to obtain Artifact objects.  So, the object returned
+  by validate() will only contain Artifact objects for such fields.  A similar
+  process applies to lists of Artifacts -- each element in the list may be
+  either a string or an Artifact.
+
+  Note that arguments validated via ArgumentSpec are always keyword arguments,
+  never positional.  SEBS rule constructors never accept positional arguments.
+  """
+
+  def __init__(self, **kwargs):
+    self.spec_map = kwargs
+
+  def extend(self, **kwargs):
+    copy = self.spec_map.copy()
+    copy.update(kwargs)
+    return ArgumentSpec(**copy)
+
+  def validate(self, function_name, context, args):
+    result = _RuleArgs()
+
+    for name, value in args.items():
+      if name not in self.spec_map:
+        raise TypeError(
+            "%s() got an unexpected keyword argument '%s'" %
+            (function_name, name))
+
+      spec = self.spec_map[name]
+      if isinstance(spec, tuple):
+        arg_type = spec[0]
+      else:
+        arg_type = spec
+      result.__dict__[name] = self.__validate_arg(
+          function_name, name, context, value, arg_type)
+
+    for name, spec in self.spec_map.items():
+      if name not in result.__dict__:
+        if isinstance(spec, tuple):
+          result.__dict__[name] = spec[1]
+        else:
+          raise TypeError("%s() requires missing argument '%s' %s" %
+                          (function_name, name))
+
+    return result
+
+  def __validate_arg(self, function_name, arg_name, context, value, arg_type):
+    if isinstance(arg_type, list):
+      return [
+          self.__validate_arg(function_name, arg_name, context, e, arg_type[0])
+          for e in value ]
+    elif arg_type is Artifact:
+      if isinstance(value, basestring):
+        return context.source_artifact(value)
+      elif isinstance(value, Artifact):
+        return value
+      else:
+        raise TypeError("%s(), argument '%s':  Expected source file name or "
+                        "artifact, got: %s" % (function_name, arg_name, value))
+    else:
+      if isinstance(value, arg_type):
+        return value
+      else:
+        raise TypeError("%s(), argument '%s':  Expected %s, got: %s" %
+                        (function_name, arg_name, arg_type, value))
+
 class Rule(object):
   """Base class for a rule which can be built.  Generally, SEBS files contain
   a list of rules, where each rule expands to a set of actions.  So, a rule
@@ -270,9 +379,24 @@ class Rule(object):
     outputs List of Artifacts which should be built when this Rule is specified
             on the SEBS command line.  It is the responsibility of the Rule
             subclass to initialize this attribute.  Normally this attribute
-            is not initialized until expand_once() has been called."""
+            is not initialized until expand_once() has been called.
 
-  def __init__(self, context=None):
+  When subclassing Rule, do NOT define an __init__() method.  Instead, you
+  must specify your class's constructor parameters via a static field
+  argument_spec, which must be an instance of ArgumentSpec.  For example:
+
+    class MyTarget(sebs.Rule):
+      argument_spec = sebs.ArgumentSpec(
+          name = str,               # Argument "name" is a string.
+          srcs = [sebs.Artifact])   # Argument "srcs" is a list of files.
+
+      def _expand(self, args):
+        # Constructor arguments can be accessed as args.name and args.srcs.
+  """
+
+  argument_spec = ArgumentSpec()
+
+  def __init__(self, context=None, **kwargs):
     typecheck(context, Context)
 
     if context is None:
@@ -293,6 +417,9 @@ class Rule(object):
         # but we want to use the innermost match, so we want to continue the
         # loop here and repeatedly overwrite self.line.
 
+    self.__args = self.argument_spec.validate(
+        str(self.__class__), self.context, kwargs)
+
   def __get_name(self):
     sebsfile = self.context.filename
     if sebsfile.endswith("/SEBS"):
@@ -304,9 +431,11 @@ class Rule(object):
 
   name = property(__get_name)
 
-  def _expand(self):
+  def _expand(self, args):
     """Expand the Rule to build its Action graph.  This is called the first
-    time expand_once() is called.  Subclasses should override this."""
+    time expand_once() is called.  Subclasses should override this.  |args|
+    is an object containing the validated constructor arguments, as returned
+    by ArgumentSpec.validate()."""
     raise NotImplementedError
 
   def expand_once(self):
@@ -317,9 +446,11 @@ class Rule(object):
     _expand(), a Rule must call expand_once() on each of its direct
     dependencies."""
 
-    # TODO(kenton):  Detect recursion?
-    if not self.__expanded:
-      self._expand()
+    if self.__expanded is None:
+      raise DefinitionError("Rule cyclically depends on self: %s" % self.name)
+    elif not self.__expanded:
+      self.__expanded = None
+      self._expand(self.__args)
       self.__expanded = True
 
 class Test(Rule):

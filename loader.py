@@ -31,7 +31,8 @@
 
 import os
 
-from sebs.core import Rule, Test, Artifact, Action, Context, DefinitionError
+from sebs.core import Rule, Test, Artifact, Action, Context, DefinitionError, \
+                      ArgumentSpec
 from sebs.filesystem import Directory
 from sebs.helpers import typecheck
 import sebs.command as command
@@ -123,6 +124,7 @@ class _Builtins(object):
     typecheck(context, _ContextImpl)
     self.Rule = Rule
     self.Test = Test
+    self.ArgumentSpec = ArgumentSpec
     self.Artifact = Artifact
     self.Action = Action
     self.DefinitionError = DefinitionError

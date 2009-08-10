@@ -33,7 +33,8 @@
 import traceback
 import unittest
 
-from sebs.core import Context, Rule, Artifact, Action, DefinitionError
+from sebs.core import Context, Rule, Artifact, Action, DefinitionError, \
+                      ArgumentSpec
 
 class MockContext(Context):
   def __init__(self, filename, full_filename):
@@ -41,9 +42,23 @@ class MockContext(Context):
     self.filename = filename
     self.full_filename = full_filename
 
+  def source_artifact(self, filename):
+    return Artifact("foo/" + filename, None)
+
 class MockRule(Rule):
-  def __init__(self, context):
-    super(MockRule, self).__init__(context)
+  argument_spec = ArgumentSpec(int_arg = (int, 321),
+                               list_int_arg = ([int], [6, 5, 4]),
+                               artifact_arg = (Artifact, None),
+                               list_artifact_arg = ([Artifact], []))
+
+  def _expand(self, args):
+    self.args = args
+
+class RuleWithRequiredArg(Rule):
+  argument_spec = ArgumentSpec(int_arg = int)
+
+  def _expand(self, args):
+    self.args = args
 
 class CoreTest(unittest.TestCase):
   # There's really not that much that we can test here.
@@ -59,6 +74,59 @@ class CoreTest(unittest.TestCase):
     self.assertEqual("foo.sebs:%d" % (line + 2), rule.name)
     rule.label = "foo"
     self.assertEqual("foo.sebs:foo", rule.name)
+
+  def testInitAndValidate(self):
+    context = MockContext("foo.sebs", "foo.sebs")
+    self.assertRaises(TypeError, MockRule, context = context,
+                      int_arg = "bar")
+    self.assertRaises(TypeError, MockRule, context = context,
+                      list_int_arg = 1)
+    self.assertRaises(TypeError, MockRule, context = context,
+                      list_int_arg = ["bar"])
+    self.assertRaises(TypeError, MockRule, context = context,
+                      artifact_arg = 1)
+    self.assertRaises(TypeError, RuleWithRequiredArg, context = context)
+
+    # Default values.
+    rule = MockRule(context = context)
+    rule.expand_once()
+    self.assertEqual(321, rule.args.int_arg)
+    self.assertEqual([6, 5, 4], rule.args.list_int_arg)
+    self.assertEqual(None, rule.args.artifact_arg)
+    self.assertEqual([], rule.args.list_artifact_arg)
+
+    # Set everything.
+    rule = MockRule(context = context,
+                    int_arg = 123,
+                    list_int_arg = [4, 5, 6],
+                    artifact_arg = "baz",
+                    list_artifact_arg = ["qux", "quux"])
+    rule.expand_once()
+    self.assertEqual(123, rule.args.int_arg)
+    self.assertEqual([4, 5, 6], rule.args.list_int_arg)
+    self.assertTrue(isinstance(rule.args.artifact_arg, Artifact))
+    self.assertEqual("foo/baz", rule.args.artifact_arg.filename)
+    self.assertTrue(isinstance(rule.args.list_artifact_arg, list))
+    self.assertEqual(2, len(rule.args.list_artifact_arg))
+    self.assertTrue(isinstance(rule.args.list_artifact_arg[0], Artifact))
+    self.assertTrue(isinstance(rule.args.list_artifact_arg[1], Artifact))
+    self.assertEqual("foo/qux", rule.args.list_artifact_arg[0].filename)
+    self.assertEqual("foo/quux", rule.args.list_artifact_arg[1].filename)
+
+    # Pass actual artifact for artifact params, instead of string.
+    corge = Artifact("corge", None)
+    rule = MockRule(context = context,
+                    artifact_arg = corge,
+                    list_artifact_arg = [corge, "garply"])
+    rule.expand_once()
+    self.assertEqual(corge, rule.args.artifact_arg)
+    self.assertEqual(corge, rule.args.list_artifact_arg[0])
+    self.assertEqual("foo/garply", rule.args.list_artifact_arg[1].filename)
+
+    # Miss
+    rule = RuleWithRequiredArg(context = context, int_arg = 123)
+    rule.expand_once()
+    self.assertEqual(123, rule.args.int_arg)
 
 if __name__ == "__main__":
   unittest.main()
