@@ -55,6 +55,7 @@ The contents of this directory should never be modified except by invoking SEBS.
 """
 
 import traceback
+import os.path
 
 from sebs.helpers import typecheck
 
@@ -235,6 +236,21 @@ class Context(object):
     only store text, not binary data."""
 
     raise NotImplementedError
+
+  def derived_artifact(self, artifact, extension, action):
+    """Returns an artifact whose name is derived from the given artifact, with
+    the file extension replaced with |extension| (a string).  The new artifact
+    behaves like an intermediate artifact."""
+
+    typecheck(artifact, Artifact)
+    typecheck(extension, basestring)
+    typecheck(action, Action)
+
+    filename = self.local_filename(artifact)
+    if filename is None:
+      filename = artifact.filename.replace("/", "_")
+    basename, _ = os.path.splitext(filename)
+    return self.intermediate_artifact(basename + extension, action)
 
   def output_artifact(self, directory, filename, action):
     """Returns an Artifact representing an output artifact which is suitable

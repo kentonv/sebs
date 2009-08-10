@@ -109,14 +109,10 @@ class _Base(sebs.Rule):
     self.objects = []
     for src in args.srcs:
       src_artifact = self.context.source_artifact(src)
-      src_filename = self.context.local_filename(src)
-      if src_filename is None:
-        raise sebs.DefinitionError(
-          "Source file is not in this package: %s" % src)
-      name, ext = os.path.splitext(src_filename)
+      name, ext = os.path.splitext(src_artifact.filename)
       if ext in [".c", ".C", ".cc", ".cpp", ".cxx", ".c++"]:
         action = self.context.action(self, "compile", src_artifact.filename)
-        obj = self.context.intermediate_artifact(name + ".o", action)
+        obj = self.context.derived_artifact(src_artifact, ".o", action)
         self.objects.append(obj)
         action.set_command(
           sebs.SubprocessCommand(action,
@@ -149,7 +145,7 @@ class _Base(sebs.Rule):
       # Create a stable, unique temporary name for the library.
       input_digest = md5.new()
       for src in self.__srcs:
-        input_digest.update(self.context.local_filename(src))
+        input_digest.update(src.filename)
       return input_digest.hexdigest()[-8:]
     else:
       return self.label

@@ -29,8 +29,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os.path
-
 # TODO(kenton):  Factor out common dependency handling code.
 
 class Library(sebs.Rule):
@@ -75,12 +73,8 @@ class Test(sebs.Test):
       dep.expand_once()
       implicit.extend(dep.srcs)
     action = self.context.action(self, "test", args.main.filename)
-    main_name = self.context.local_filename(args.main)
-
-    output = self.context.intermediate_artifact(
-      os.path.splitext(main_name)[0] + "_output.txt", action)
-    result = self.context.memory_artifact(
-      os.path.splitext(main_name)[0] + "_result", action)
+    output = self.context.derived_artifact(args.main, "_output.txt", action)
+    result = self.context.derived_artifact(args.main, "_result", action)
 
     action.set_command(sebs.SubprocessCommand(action, ["python", args.main],
                                               implicit = implicit,
