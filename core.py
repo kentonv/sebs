@@ -356,7 +356,7 @@ class ArgumentSpec(object):
         if isinstance(spec, tuple):
           result.__dict__[name] = spec[1]
         else:
-          raise TypeError("%s() requires missing argument '%s' %s" %
+          raise TypeError("%s() requires missing argument '%s'" %
                           (function_name, name))
 
     return result

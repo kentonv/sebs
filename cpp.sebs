@@ -48,10 +48,11 @@ class _EnvironmentOption(sebs.Rule):
     action = self.context.action(self, "configure", description)
     output = self.context.memory_artifact(args.env_name, action)
 
-    default = args.default
-    if isinstance(default, _EnvironmentOption):
-      default.expand_once()
-      default = default.output
+    if args.default_copy_from is not None:
+      args.default_copy_from.expand_once()
+      default = args.default_copy_from.output
+    else:
+      default = args.default
 
     action.set_command(sebs.EnvironmentCommand(
         args.env_name, output, default, output_message=True))
@@ -101,30 +102,19 @@ class _Base(sebs.Rule):
   def _expand(self, args):
     self.__srcs = args.srcs
 
-    env_vars = [cxx, cflags, cxxflags]
-    for rule in env_vars:
-      rule.expand_once()
-    env_artifacts = [env.output for env in env_vars]
-
-    self.objects = []
-    for src in args.srcs:
-      src_artifact = self.context.source_artifact(src)
-      name, ext = os.path.splitext(src_artifact.filename)
-      if ext in [".c", ".C", ".cc", ".cpp", ".cxx", ".c++"]:
-        action = self.context.action(self, "compile", src_artifact.filename)
-        obj = self.context.derived_artifact(src_artifact, ".o", action)
-        self.objects.append(obj)
-        action.set_command(
-          sebs.SubprocessCommand(action,
-                                 [cxx.value, cxxflags.value,
-                                  "-Isrc", "-Itmp", "-Iinclude",
-                                  "-c", src_artifact, "-o", obj]))
-      elif ext not in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
-        raise sebs.DefinitionError(
-          "File extension not recognized as a C++ source or header: %s" % src)
+    # ----------------------------------------------------------------
+    # find transitive deps
 
     self.transitive_deps = set()
     self.transitive_libs = set()
+    self.generated_headers = set()
+
+    for src in args.srcs:
+      name, ext = os.path.splitext(src.filename)
+      if src.action is not None and \
+         ext in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
+        self.generated_headers.add(src)
+
     for dep in args.deps:
       dep = dep.as_cpp_library()
       if isinstance(dep, SystemLibrary):
@@ -136,9 +126,34 @@ class _Base(sebs.Rule):
         self.transitive_deps.add(dep.static_library)
         self.transitive_deps.update(dep.transitive_deps)
         self.transitive_libs.update(dep.transitive_libs)
+        self.generated_headers.update(dep.generated_headers)
       else:
         raise sebs.DefinitionError(
           "Dependency of C++ rule is not a C++ library: %s" % dep)
+
+    # ----------------------------------------------------------------
+    # make compile actions
+
+    for rule in [cxx, cflags, cxxflags]:
+      rule.expand_once()
+
+    self.objects = []
+    generated_headers = list(self.generated_headers)
+    for src in args.srcs:
+      name, ext = os.path.splitext(src.filename)
+      if ext in [".c", ".C", ".cc", ".cpp", ".cxx", ".c++"]:
+        action = self.context.action(self, "compile", src.filename)
+        obj = self.context.derived_artifact(src, ".o", action)
+        self.objects.append(obj)
+        action.set_command(
+          sebs.SubprocessCommand(action,
+                                 [cxx.value, cxxflags.value,
+                                  "-Isrc", "-Itmp", "-Iinclude",
+                                  "-c", src, "-o", obj],
+                                 implicit = generated_headers))
+      elif ext not in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
+        raise sebs.DefinitionError(
+          "File extension not recognized as a C++ source or header: %s" % src)
 
   def anonymous_name(self):
     if self.label is None:

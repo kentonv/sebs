@@ -156,8 +156,18 @@ class _CommandContextImpl(CommandContext):
     else:
       stdin_str = None
     proc = subprocess.Popen(args, **kwargs)
-    stdout_str, stderr_str = proc.communicate(stdin_str)
-    return (proc.returncode, stdout_str, stderr_str)
+    try:
+      stdout_str, stderr_str = proc.communicate(stdin_str)
+      return (proc.returncode, stdout_str, stderr_str)
+    except:
+      # Kill the process if it is still running.
+      # Only available on python 2.6 and later.
+      if "kill" in proc.__dict__:
+        try:
+          proc.kill()
+        except:
+          pass
+      raise
 
   def message(self, text):
     if self.__use_color:
@@ -211,16 +221,23 @@ class SubprocessRunner(ActionRunner):
         context.resolve_mem_files()
         # Set modification time of all outputs to zero to make sure they are
         # rebuilt on the next run.
-        for output in outputs:
-          try:
-            self.__working_dir.touch(output.filename, 0)
-          except Exception:
-            pass
+        self.__reset_mtime(outputs)
         return False
+    except:
+      # Like above.
+      self.__reset_mtime(outputs)
+      raise
     finally:
       context.resolve_mem_files()
 
     return True
+
+  def __reset_mtime(self, artifacts):
+    for artifact in artifacts:
+      try:
+        self.__working_dir.touch(artifact.filename, 0)
+      except Exception:
+        pass
 
 # TODO(kenton):  ActionRunner which checks if the inputs have actually changed
 #   (e.g. by hashing them) and skips the action if not (just touches the
