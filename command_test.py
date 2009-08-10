@@ -51,7 +51,7 @@ class MockCommandContext(CommandContext):
     self.__env = env
     self.subprocess_args = None
     self.subprocess_kwargs = None
-    self.subprocess_result = (0, None, None)
+    self.subprocess_result = (0, "", None)
     self.diskpath_prefix = diskpath_prefix
 
   def get_disk_path(self, artifact, use_temporary=True):
@@ -475,37 +475,39 @@ class SubprocessCommandTest(unittest.TestCase):
     # No redirection.
     command = SubprocessCommand(self.__action, ["foo"])
     context = MockCommandContext(self.__dir)
+    context.subprocess_result = (0, "some text", None)
     log = cStringIO.StringIO()
     self.assertTrue(command.run(context, log))
-    # TODO(kenton): Uncomment when bug with writing to log is solved.
-    #self.assertTrue(context.subprocess_kwargs["stdout"] is log)
-    self.assertTrue(context.subprocess_kwargs["stdout"] is None)
+    self.assertTrue(context.subprocess_kwargs["stdout"] is subprocess.PIPE)
     self.assertTrue(context.subprocess_kwargs["stderr"] is subprocess.STDOUT)
+    self.assertEquals("some text", log.getvalue())
     self.assertEquals("foo\n", _print_command(command))
 
     # Redirect stdout.
     command = SubprocessCommand(self.__action, ["foo"],
                                 capture_stdout = self.__artifact)
     context = MockCommandContext(self.__dir)
-    context.subprocess_result = (0, "some text", None)
+    context.subprocess_result = (0, "some text", "error text")
     log = cStringIO.StringIO()
     self.assertTrue(command.run(context, log))
     self.assertTrue(context.subprocess_kwargs["stdout"] is subprocess.PIPE)
-    self.assertTrue(context.subprocess_kwargs["stderr"] is log)
+    self.assertTrue(context.subprocess_kwargs["stderr"] is subprocess.PIPE)
     self.assertEquals("some text", self.__dir.read("filename"))
+    self.assertEquals("error text", log.getvalue())
     self.assertEquals("foo > filename\n", _print_command(command))
 
     # Redirect stderr.
     command = SubprocessCommand(self.__action, ["foo"],
                                 capture_stderr = self.__artifact)
     context = MockCommandContext(self.__dir)
-    context.subprocess_result = (0, None, "error text")
+    context.subprocess_result = (0, "some text", "error text")
     log = cStringIO.StringIO()
     self.assertTrue(command.run(context, log))
     # TODO(kenton): Uncomment when bug with writing to log is solved.
     #self.assertTrue(context.subprocess_kwargs["stdout"] is log)
-    self.assertTrue(context.subprocess_kwargs["stdout"] is None)
+    self.assertTrue(context.subprocess_kwargs["stdout"] is subprocess.PIPE)
     self.assertTrue(context.subprocess_kwargs["stderr"] is subprocess.PIPE)
+    self.assertEquals("some text", log.getvalue())
     self.assertEquals("error text", self.__dir.read("filename"))
     self.assertEquals("foo 2> filename\n", _print_command(command))
 
@@ -540,15 +542,15 @@ class SubprocessCommandTest(unittest.TestCase):
     command = SubprocessCommand(self.__action, ["foo"])
 
     context = MockCommandContext(self.__dir)
-    context.subprocess_result = (0, None, None)
+    context.subprocess_result = (0, "", None)
     self.assertTrue(command.run(context, cStringIO.StringIO()))
 
     context = MockCommandContext(self.__dir)
-    context.subprocess_result = (1, None, None)
+    context.subprocess_result = (1, "", None)
     self.assertFalse(command.run(context, cStringIO.StringIO()))
 
     context = MockCommandContext(self.__dir)
-    context.subprocess_result = (-1, None, None)
+    context.subprocess_result = (-1, "", None)
     self.assertFalse(command.run(context, cStringIO.StringIO()))
 
     # Redirect exit status.
@@ -558,12 +560,12 @@ class SubprocessCommandTest(unittest.TestCase):
                       _print_command(command))
 
     context = MockCommandContext(self.__dir)
-    context.subprocess_result = (0, None, None)
+    context.subprocess_result = (0, "", None)
     self.assertTrue(command.run(context, cStringIO.StringIO()))
     self.assertEquals("true", self.__dir.read("filename"))
 
     context = MockCommandContext(self.__dir)
-    context.subprocess_result = (1, None, None)
+    context.subprocess_result = (1, "", None)
     self.assertTrue(command.run(context, cStringIO.StringIO()))
     self.assertEquals("false", self.__dir.read("filename"))
 

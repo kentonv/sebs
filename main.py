@@ -171,7 +171,9 @@ def build(root_dir, argv):
     return 1
 
   if argv[0] == "test":
-    builder.print_test_results()
+    if not builder.print_test_results():
+      return 1
+
   return 0
 
 def clean(root_dir, argv):
