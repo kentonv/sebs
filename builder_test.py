@@ -33,18 +33,20 @@
 # TODO(kenton): Test DryRunner and SubprocessRunner.
 
 import unittest
+import cStringIO
 
 from sebs.core import Artifact, Action, Rule, Context, DefinitionError
 from sebs.filesystem import VirtualDirectory
 from sebs.builder import Builder, ActionRunner
 from sebs.command import Command
+from sebs.console import make_console
 
 class MockRunner(ActionRunner):
   def __init__(self, dir):
     self.actions = []
     self.__dir = dir
 
-  def run(self, action, inputs, outputs):
+  def run(self, action, inputs, outputs, test_result, lock):
     self.actions.append(action)
 
     # Hack for testDerivedCondition:  If the action is condition_builder then
@@ -93,9 +95,10 @@ class BuilderTest(unittest.TestCase):
     self.dir = VirtualDirectory()
     self.context = MockContext("mock.sebs", "src/mock.sebs")
     self.rule = Rule(self.context)
+    self.console = make_console(cStringIO.StringIO())  # ignore output
 
   def doBuild(self, *artifacts):
-    builder = Builder(self.dir)
+    builder = Builder(self.dir, self.console)
     runner = MockRunner(self.dir)
     for artifact in artifacts:
       builder.add_artifact(artifact)

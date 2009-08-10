@@ -29,11 +29,14 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import cStringIO
 import collections
 import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 from sebs.core import Rule, Test, Action, Artifact, ContentToken, \
                       DefinitionError
@@ -41,6 +44,7 @@ from sebs.filesystem import Directory
 from sebs.helpers import typecheck
 from sebs.command import CommandContext, Command, SubprocessCommand, \
                          ArtifactEnumerator
+from sebs.console import ColoredText
 
 # TODO(kenton):  ActionRunner and implementations belong in a separate module.
 
@@ -50,55 +54,23 @@ class ActionRunner(object):
   def __init__(self):
     pass
 
-  def run(self, action, inputs, outputs):
+  def run(self, action, inputs, outputs, test_result, lock):
     """Executes the given action.  Returns true if the command succeeds, false
     if it fails.  |inputs| and |outputs| are lists of artifacts that are the
     inputs and outputs of this action, as determined by calling
     enumerate_artifacts on the command."""
     raise NotImplementedError
 
-class DryRunner(ActionRunner):
-  """An ActionRunner which simply prints each command that would be run."""
-
-  def __init__(self, output):
-    super(DryRunner, self).__init__()
-    self.__output = output
-
-  def run(self, action, inputs, outputs):
-    typecheck(action, Action)
-
-    self.__output.write("%s: %s\n" % (action.verb, action.name))
-
-    if action.stdout is None:
-      suffix = []
-    else:
-      suffix = [">", action.stdout.filename]
-
-    for command in action.commands:
-      formatted = list(self.__format_command(command))
-      print " ", " ".join(formatted + suffix)
-
-    return True
-
-  def __format_command(self, command):
-    for arg in command:
-      if isinstance(arg, basestring):
-        yield arg
-      elif isinstance(arg, Artifact):
-        yield arg.filename
-      elif isinstance(arg, ContentToken):
-        yield "`cat %s`" % arg.artifact.filename
-      elif isinstance(arg, list):
-        yield "".join(self.__format_command(arg))
-      else:
-        raise AssertionError("Invalid argument.")
-
 class _CommandContextImpl(CommandContext):
-  def __init__(self, working_dir, verbose, use_color):
+  def __init__(self, working_dir, pending_message, verbose, lock):
     self.__working_dir = working_dir
     self.__temp_files_for_mem = {}
+    self.__pending_message = pending_message
     self.__verbose = verbose
-    self.__use_color = use_color
+    self.__lock = lock
+
+    self.__original_text = list(self.__pending_message.text)
+    self.__verbose_text = []
 
   def get_disk_path(self, artifact, use_temporary=True):
     filename = artifact.filename
@@ -149,13 +121,17 @@ class _CommandContextImpl(CommandContext):
 
   def subprocess(self, args, **kwargs):
     if self.__verbose:
-      print " ", " ".join(args)
+      self.__verbose_text.append("\n  ")
+      self.__verbose_text.append(" ".join(args))
+      self.__pending_message.update(self.__original_text + self.__verbose_text)
     if "stdin" in kwargs and isinstance(kwargs["stdin"], str):
       stdin_str = kwargs["stdin"]
       kwargs["stdin"] = subprocess.PIPE
     else:
       stdin_str = None
     proc = subprocess.Popen(args, **kwargs)
+
+    self.__lock.release()
     try:
       stdout_str, stderr_str = proc.communicate(stdin_str)
       return (proc.returncode, stdout_str, stderr_str)
@@ -168,11 +144,13 @@ class _CommandContextImpl(CommandContext):
         except:
           pass
       raise
+    finally:
+      self.__lock.acquire()
 
-  def message(self, text):
-    if self.__use_color:
-      text = "\033[34m%s\033[0m" % text
-    print " ", text
+  def status(self, text):
+    self.__original_text.append(" ")
+    self.__original_text.append(ColoredText(ColoredText.BLUE, text))
+    self.__pending_message.update(self.__original_text + self.__verbose_text)
 
   def resolve_mem_files(self):
     for (filename, diskfile) in self.__temp_files_for_mem.items():
@@ -185,13 +163,12 @@ class _CommandContextImpl(CommandContext):
 class SubprocessRunner(ActionRunner):
   """An ActionRunner which actually executes the commands."""
 
-  def __init__(self, working_dir, stdout, verbose = False):
+  def __init__(self, working_dir, console, verbose = False):
     super(SubprocessRunner, self).__init__()
 
     self.__env = os.environ.copy()
     self.__working_dir = working_dir
-    self.__stdout = stdout
-    self.__use_color = self.__stdout.isatty()
+    self.__console = console
     self.__temp_files_for_mem = {}
     self.__verbose = verbose
 
@@ -201,13 +178,11 @@ class SubprocessRunner(ActionRunner):
     #   take advantage of that to import SEBS implementation modules.
     self.__env["PYTHONPATH"] = "src"
 
-  def run(self, action, inputs, outputs):
+  def run(self, action, inputs, outputs, test_result, lock):
     typecheck(action, Action)
-    if self.__use_color:
-      self.__stdout.write(
-          "\033[1;34m%s:\033[0m %s\n" % (action.verb, action.name))
-    else:
-      self.__stdout.write("%s: %s\n" % (action.verb, action.name))
+
+    pending_message = self.__console.add_pending([
+        ColoredText(ColoredText.BLUE, action.verb + ": "), action.name])
 
     # Make sure the output directories exist.
     # TODO(kenton):  Also delete output files from previous runs?
@@ -215,20 +190,40 @@ class SubprocessRunner(ActionRunner):
       self.__working_dir.mkdir(os.path.dirname(output.filename))
 
     context = _CommandContextImpl(
-        self.__working_dir, self.__verbose, self.__use_color)
+        self.__working_dir, pending_message, self.__verbose, lock)
     try:
-      if not action.command.run(context, sys.stderr):
-        context.resolve_mem_files()
+      log = cStringIO.StringIO()
+      result = action.command.run(context, log)
+      context.resolve_mem_files()
+
+      final_text = [pending_message.text]
+      log_text = log.getvalue()
+      if log_text != "":
+        final_text.append("\n  ")
+        final_text.append(log_text.strip().replace("\n", "\n  "))
+
+      if not result:
         # Set modification time of all outputs to zero to make sure they are
         # rebuilt on the next run.
         self.__reset_mtime(outputs)
+
+        pending_message.finish(
+            [ColoredText(ColoredText.RED, "ERROR: ")] + final_text)
+
         return False
     except:
       # Like above.
+      context.resolve_mem_files()
       self.__reset_mtime(outputs)
       raise
-    finally:
-      context.resolve_mem_files()
+
+    if test_result is not None:
+      if context.read(test_result) == "true":
+        passfail = ColoredText(ColoredText.GREEN, "PASS: ")
+      else:
+        passfail = ColoredText(ColoredText.RED, "FAIL: ")
+      final_text = [passfail] + final_text
+    pending_message.finish(final_text)
 
     return True
 
@@ -419,16 +414,21 @@ class _StateMap(object):
       return result
 
 class Builder(object):
-  def __init__(self, root_dir):
+  def __init__(self, root_dir, console):
     typecheck(root_dir, Directory)
 
     self.__state_map = _StateMap(root_dir)
     self.__root_dir = root_dir
+    self.__console = console
+    self.__lock = threading.Lock()
+    self.__num_pending = 0
 
     # Actions which are ready but haven't been started.
     self.__action_queue = collections.deque()
 
     self.__tests = []
+
+    self.failed = False
 
   def add_action(self, action):
     typecheck(action, Action)
@@ -439,6 +439,7 @@ class Builder(object):
       return
 
     action_state.is_pending = True
+    self.__num_pending = self.__num_pending + 1
     if action_state.is_ready:
       self.__action_queue.append(action)
     else:
@@ -480,89 +481,69 @@ class Builder(object):
     self.__tests.append((test.name, test, cached))
 
   def build(self, action_runner):
-    typecheck(action_runner, ActionRunner)
+    self.__lock.acquire()
+    try:
+      typecheck(action_runner, ActionRunner)
 
-    while len(self.__action_queue) > 0:
-      action = self.__action_queue.popleft()
-      action_state = self.__state_map.action_state(action)
-      if not action_runner.run(action, action_state.inputs,
-                                       action_state.outputs):
-        print "BUILD FAILED"
-        return False
+      while self.__num_pending > 0 and not self.failed:
+        if len(self.__action_queue) == 0:
+          # wait for actions
+          # TODO(kenton):  Use a semaphore or something?
+          self.__lock.release()
+          time.sleep(1)
+          self.__lock.acquire()
+          continue
 
-      if action_state.test is not None:
-        self.__test_done(action_state.test)
+        action = self.__action_queue.popleft()
+        action_state = self.__state_map.action_state(action)
+        test_result = None
+        if action_state.test is not None:
+          test_result = action_state.test.test_result_artifact
+        self.__num_pending = self.__num_pending - 1
+        if not action_runner.run(action, action_state.inputs,
+                                         action_state.outputs,
+                                         test_result,
+                                         self.__lock):
+          if not self.failed:
+            self.__console.write(ColoredText(ColoredText.RED, "BUILD FAILED"))
+            self.failed = True
+          return
 
-      newly_ready = []
+        newly_ready = []
 
-      for output in action_state.outputs:
-        self.__state_map.artifact_state(output).is_dirty = False
+        for output in action_state.outputs:
+          self.__state_map.artifact_state(output).is_dirty = False
 
-      for dependent in action_state.blocked:
-        dependent_state = self.__state_map.action_state(dependent)
-        became_ready = dependent_state.update_readiness(self.__state_map,
-                                                        self.__root_dir)
-        if dependent_state.is_pending:
-          if became_ready:
-            newly_ready.append(dependent)
-          else:
-            # This action is still blocked on something else.  It's possible
-            # that completion of the current action caused this dependent to
-            # realize that it needs some other inputs that it didn't know
-            # about before.  Thus its blocking list may now contain actions
-            # that didn't previously know we needed to build.  We must scan
-            # through the list and add any such actions to the pending list.
-            for blocker in dependent_state.blocking:
-              if not self.__state_map.action_state(blocker).is_pending:
-                self.add_action(blocker)
+        for dependent in action_state.blocked:
+          dependent_state = self.__state_map.action_state(dependent)
+          became_ready = dependent_state.update_readiness(self.__state_map,
+                                                          self.__root_dir)
+          if dependent_state.is_pending:
+            if became_ready:
+              newly_ready.append(dependent)
+            else:
+              # This action is still blocked on something else.  It's possible
+              # that completion of the current action caused this dependent to
+              # realize that it needs some other inputs that it didn't know
+              # about before.  Thus its blocking list may now contain actions
+              # that didn't previously know we needed to build.  We must scan
+              # through the list and add any such actions to the pending list.
+              for blocker in dependent_state.blocking:
+                if not self.__state_map.action_state(blocker).is_pending:
+                  self.add_action(blocker)
 
-      # Stick newly-ready stuff at the beginning of the queue so that local
-      # work tends to be grouped together.  For example, if we're building
-      # C++ libraries A and B, we'd like to compile the sources of A, then
-      # link A, then compile the sources of B, then link B.  If we added
-      # newly-ready stuff to the end of the queue, we'd end up compiling all
-      # sources of both libraries before linking either one.
-      newly_ready.reverse()
-      self.__action_queue.extendleft(newly_ready)
+        # Stick newly-ready stuff at the beginning of the queue so that local
+        # work tends to be grouped together.  For example, if we're building
+        # C++ libraries A and B, we'd like to compile the sources of A, then
+        # link A, then compile the sources of B, then link B.  If we added
+        # newly-ready stuff to the end of the queue, we'd end up compiling all
+        # sources of both libraries before linking either one.
+        newly_ready.reverse()
+        self.__action_queue.extendleft(newly_ready)
+    finally:
+      self.__lock.release()
 
-    return True
-
-  def __test_done(self, test, cached = False):
-    result = self.__root_dir.read(test.test_result_artifact.filename)
-
-    if cached:
-      passmsg, failmsg = ("PASS (cached):", "FAIL (cached):")
-    else:
-      passmsg, failmsg = ("PASS:", "FAIL:")
-
-    if sys.stdout.isatty():
-      passmsg = "\033[32m%s\033[0m" % passmsg
-      failmsg = "\033[31m%s\033[0m" % failmsg
-    else:
-      passmsg, failmsg = ("PASS:", "FAIL:")
-
-    if result == "true":
-      print passmsg, test.name
-    elif result == "false":
-      print failmsg, test.name
-      print " ", test.test_output_artifact.filename
-    else:
-      raise DefinitionError("Test result is not true or false: %s" % test)
-
-  def test(self, action_runner):
-    # Note cached tests early.
-    for name, test, cached in self.__tests:
-      if cached:
-        self.__test_done(test, True)
-
-    if not self.build(action_runner):
-      return False
-
-    if sys.stdout.isatty():
-      passed, failed, suffix = ("\033[32mPASSED", "\033[31mFAILED", "\033[0m")
-    else:
-      passed, failed, suffix = ("PASSED", "FAILED", "")
-
+  def print_test_results(self):
     self.__tests.sort()
 
     print "\nTest results:"
@@ -571,21 +552,19 @@ class Builder(object):
     for name, test, cached in self.__tests:
       result = self.__root_dir.read(test.test_result_artifact.filename)
 
-      if result == "true":
-        indicator = passed
-      elif result == "false":
-        indicator = failed
-        had_failure = True
-      else:
-        raise DefinitionError("Test result is not true or false: %s" % test)
-
+      suffix = ""
       if cached:
-        indicator += " (cached)"
-      indicator += suffix
+        suffix = " (cached)"
 
-      print "  %-70s %s" % (name, indicator)
+      if result == "true":
+        indicator = ColoredText(ColoredText.GREEN, "PASSED" + suffix)
+      else:
+        indicator = ColoredText(ColoredText.RED, "FAILED" + suffix)
+        had_failure = True
 
+      message = ["  %-70s " % name, indicator]
       if result == "false":
-        print "   ", test.test_output_artifact.filename
+        message.extend(["\n    ", test.test_output_artifact.filename])
+      self.__console.write(message)
 
     return not had_failure

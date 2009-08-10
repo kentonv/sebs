@@ -153,14 +153,14 @@ class EnvironmentCommand(Command):
   the latter case, the artifact's contents are copied into the output."""
 
   def __init__(self, env_name, output_artifact, default=None,
-               output_message=False):
+               set_status=False):
     typecheck(env_name, str)
     typecheck(output_artifact, Artifact)
     typecheck(default, [str, Artifact])
     self.__env_name = env_name
     self.__output_artifact = output_artifact
     self.__default = default
-    self.__output_message = output_message
+    self.__set_status = set_status
 
   def enumerate_artifacts(self, artifact_enumerator):
     typecheck(artifact_enumerator, ArtifactEnumerator)
@@ -182,8 +182,8 @@ class EnvironmentCommand(Command):
       else:
         value = self.__default
     context.write(self.__output_artifact, value)
-    if self.__output_message:
-      context.message(value)
+    if self.__set_status:
+      context.status(value)
     return True
 
   def print_(self, output):
@@ -334,9 +334,9 @@ class SubprocessCommand(Command):
 
     # Capture stdout/stderr if requested.
     if self.__capture_stdout is None:
-      # TODO(kenton):  This should be "stdout = log" but this seems to cause
-      #   the output to simply be lost.  Investigate.
-      stdout = None
+      # The log is not a unix file descriptor, so we must use a pipe and then
+      # write to in manually.
+      stdout = subprocess.PIPE
     else:
       disk_path = context.get_disk_path(self.__capture_stdout,
                                         use_temporary = False)
@@ -348,7 +348,9 @@ class SubprocessCommand(Command):
     if self.__capture_stderr is self.__capture_stdout:
       stderr = subprocess.STDOUT
     elif self.__capture_stderr is None:
-      stderr = log
+      # The log is not a unix file descriptor, so we must use a pipe and then
+      # write to in manually.
+      stderr = subprocess.PIPE
     else:
       disk_path = context.get_disk_path(self.__capture_stderr,
                                         use_temporary = False)
@@ -370,9 +372,15 @@ class SubprocessCommand(Command):
                            env = env)
 
     if stdout == subprocess.PIPE:
-      context.write(self.__capture_stdout, stdout_text)
+      if self.__capture_stdout is None:
+        log.write(stdout_text)
+      else:
+        context.write(self.__capture_stdout, stdout_text)
     if stderr == subprocess.PIPE:
-      context.write(self.__capture_stderr, stderr_text)
+      if self.__capture_stderr is None:
+        log.write(stderr_text)
+      else:
+        context.write(self.__capture_stderr, stderr_text)
 
     if self.__capture_exit_status is not None:
       if exit_code == 0:

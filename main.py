@@ -60,12 +60,14 @@ import getopt
 import os
 import shutil
 import sys
+import threading
 
-from sebs.builder import Builder, DryRunner, SubprocessRunner
+from sebs.builder import Builder, SubprocessRunner
 from sebs.core import Rule, Test
 from sebs.filesystem import DiskDirectory, VirtualDirectory, MappedDirectory
 from sebs.helpers import typecheck
 from sebs.loader import Loader, BuildFile
+from sebs.console import make_console, ColoredText
 
 class UsageError(Exception):
   pass
@@ -120,39 +122,57 @@ def _args_to_rules(loader, args):
 
 def build(root_dir, argv):
   try:
-    opts, args = getopt.getopt(argv[1:], "v", ["dry"])
+    opts, args = getopt.getopt(argv[1:], "vj:", [])
   except getopt.error, message:
     raise UsageError(message)
 
   runner = None
   verbose = False
+  console = make_console(sys.stdout)
+  threads = 1
 
   for name, value in opts:
-    if name == "--dry":
-      runner = DryRunner(sys.stdout)
-    elif name == "-v":
+    if name == "-v":
       verbose = True
+    elif name == "-j":
+      threads = int(value)
 
   if runner is None:
-    runner = SubprocessRunner(root_dir, sys.stdout, verbose)
+    runner = SubprocessRunner(root_dir, console, verbose)
 
   loader = Loader(root_dir)
-  builder = Builder(root_dir)
+  builder = Builder(root_dir, console)
 
   if argv[0] == "test":
     for rule in list(_args_to_rules(loader, args)):
       if isinstance(rule, Test):
         builder.add_test(rule)
-    success = builder.test(runner)
   else:
     for rule in list(_args_to_rules(loader, args)):
       builder.add_rule(rule)
-    success = builder.build(runner)
 
-  if success:
-    return 0
-  else:
+  thread_objects = []
+  success = True
+  for i in range(0, threads):
+    thread_objects.append(
+      threading.Thread(target = builder.build, args = [runner]))
+    thread_objects[-1].start()
+  try:
+    for thread in thread_objects:
+      thread.join()
+  except KeyboardInterrupt:
+    console.write(ColoredText(ColoredText.RED,
+        "Caught keyboard interrupt, shutting down."))
+    builder.failed = True
+    for thread in thread_objects:
+      thread.join()
+
+  if builder.failed:
     return 1
+
+  if argv[0] == "test":
+    builder.print_test_results()
+  return 0
 
 def clean(root_dir, argv):
   if len(argv) > 1:

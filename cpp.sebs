@@ -55,7 +55,7 @@ class _EnvironmentOption(sebs.Rule):
       default = args.default
 
     action.set_command(sebs.EnvironmentCommand(
-        args.env_name, output, default, output_message=True))
+        args.env_name, output, default, set_status=True))
 
     self.value = output.contents()
     self.output = output
