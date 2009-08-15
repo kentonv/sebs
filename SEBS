@@ -42,7 +42,7 @@ sebs_lib = python.Library(
            "filesystem.py",
            "helpers.py",
            "loader.py",
-           "make_py_binary.py"])
+           "runner.py" ])
 
 sebs = python.Binary(
   name = "sebs",

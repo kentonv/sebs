@@ -37,9 +37,10 @@ import cStringIO
 
 from sebs.core import Artifact, Action, Rule, Context, DefinitionError
 from sebs.filesystem import VirtualDirectory
-from sebs.builder import Builder, ActionRunner
+from sebs.builder import Builder
 from sebs.command import Command
 from sebs.console import make_console
+from sebs.runner import ActionRunner
 
 class MockRunner(ActionRunner):
   def __init__(self, dir):
@@ -109,7 +110,7 @@ class BuilderTest(unittest.TestCase):
     input = Artifact("input", None)
 
     self.assertRaises(DefinitionError, self.doBuild, input)
-    self.dir.add("input", 2, "")
+    self.dir.add("input", 20, "")
     self.assertEqual([], self.doBuild(input))
 
   def testSimpleAction(self):
@@ -119,19 +120,19 @@ class BuilderTest(unittest.TestCase):
     action.command = MockCommand([input], [output])
 
     # output doesn't exist.
-    self.dir.add("input", 2, "")
+    self.dir.add("input", 20, "")
     self.assertEqual([action], self.doBuild(output))
 
     # output exists but is older than input.
-    self.dir.add("output", 1, "")
+    self.dir.add("output", 10, "")
     self.assertEqual([action], self.doBuild(output))
 
     # output exists and is newer than input.
-    self.dir.add("output", 4, "")
+    self.dir.add("output", 40, "")
     self.assertEqual([], self.doBuild(output))
 
     # SEBS file is newer than output.
-    self.context.timestamp = 5
+    self.context.timestamp = 50
     self.assertEqual([action], self.doBuild(output))
 
   def testMultipleInputsAndOutputs(self):
@@ -143,27 +144,27 @@ class BuilderTest(unittest.TestCase):
     action.command = MockCommand([in1, in2], [out1, out2])
 
     # outputs don't exist.
-    self.dir.add("in1", 2, "")
-    self.dir.add("in2", 4, "")
+    self.dir.add("in1", 20, "")
+    self.dir.add("in2", 40, "")
     self.assertEqual([action], self.doBuild(out1, out2))
 
     # only one output exists
-    self.dir.add("out1", 5, "")
+    self.dir.add("out1", 50, "")
     self.assertEqual([action], self.doBuild(out1, out2))
     self.assertEqual([], self.doBuild(out1))
 
     # both outputs exist, one is outdated
-    self.dir.add("out2", 1, "")
+    self.dir.add("out2", 10, "")
     self.assertEqual([action], self.doBuild(out1, out2))
     self.assertEqual([], self.doBuild(out1))
 
     # both outputs exist, one is older than *one* of the inputs
-    self.dir.add("out2", 3, "")
+    self.dir.add("out2", 30, "")
     self.assertEqual([action], self.doBuild(out1, out2))
     self.assertEqual([], self.doBuild(out1))
 
     # both outputs exist and are up-to-date.
-    self.dir.add("out2", 5, "")
+    self.dir.add("out2", 50, "")
     self.assertEqual([], self.doBuild(out1, out2))
 
   def testActionWithDependency(self):
@@ -176,32 +177,32 @@ class BuilderTest(unittest.TestCase):
     action2.command = MockCommand([temp], [output])
 
     # outputs don't exist.
-    self.dir.add("input", 2, "")
+    self.dir.add("input", 20, "")
     self.assertEqual([action1, action2], self.doBuild(output))
     self.assertEqual([action1], self.doBuild(temp))
 
     # temp exists but is outdated.
-    self.dir.add("temp", 1, "")
+    self.dir.add("temp", 10, "")
     self.assertEqual([action1, action2], self.doBuild(output))
     self.assertEqual([action1], self.doBuild(temp))
 
     # temp exists and is up-to-date.
-    self.dir.add("temp", 3, "")
+    self.dir.add("temp", 30, "")
     self.assertEqual([action2], self.doBuild(output))
     self.assertEqual([], self.doBuild(temp))
 
     # output exists but is outdated.
-    self.dir.add("output", 1, "")
+    self.dir.add("output", 10, "")
     self.assertEqual([action2], self.doBuild(output))
     self.assertEqual([], self.doBuild(temp))
 
     # output exists and is up-to-date.
-    self.dir.add("output", 4, "")
+    self.dir.add("output", 40, "")
     self.assertEqual([], self.doBuild(output))
     self.assertEqual([], self.doBuild(temp))
 
     # temp is outdated but output is up-to-date.
-    self.dir.add("temp", 1, "")
+    self.dir.add("temp", 10, "")
     self.assertEqual([action1, action2], self.doBuild(output))
     self.assertEqual([action1], self.doBuild(temp))
 
@@ -218,26 +219,26 @@ class BuilderTest(unittest.TestCase):
     action3.command = MockCommand([temp1, temp2], [output])
 
     # outputs don't exist.
-    self.dir.add("input", 2, "")
+    self.dir.add("input", 20, "")
     self.assertEqual([action1, action2, action3], self.doBuild(output))
     self.assertEqual([action1], self.doBuild(temp1))
     self.assertEqual([action2], self.doBuild(temp2))
 
     # one side is up-to-date, other isn't.
-    self.dir.add("temp1", 3, "")
-    self.dir.add("output", 4, "")
+    self.dir.add("temp1", 30, "")
+    self.dir.add("output", 40, "")
     self.assertEqual([action2, action3], self.doBuild(output))
     self.assertEqual([], self.doBuild(temp1))
     self.assertEqual([action2], self.doBuild(temp2))
 
     # everything up-to-date.
-    self.dir.add("temp2", 3, "")
+    self.dir.add("temp2", 30, "")
     self.assertEqual([], self.doBuild(output))
     self.assertEqual([], self.doBuild(temp1))
     self.assertEqual([], self.doBuild(temp2))
 
     # original input too new.
-    self.dir.add("input", 6, "")
+    self.dir.add("input", 60, "")
     self.assertEqual([action1, action2, action3], self.doBuild(output))
     self.assertEqual([action1], self.doBuild(temp1))
     self.assertEqual([action2], self.doBuild(temp2))
@@ -254,39 +255,39 @@ class BuilderTest(unittest.TestCase):
         condition, [input], [conditional_input], [output])
 
     # output doesn't exist, condition is false.
-    self.dir.add("cond", 2, "false")
-    self.dir.add("input", 2, "")
+    self.dir.add("cond", 20, "false")
+    self.dir.add("input", 20, "")
     self.assertEqual([action], self.doBuild(output))
 
     # output exists, condition still false.
-    self.dir.add("output", 3, "")
+    self.dir.add("output", 30, "")
     self.assertEqual([], self.doBuild(output))
 
     # condition newer than output.
-    self.dir.add("cond", 4, "")
+    self.dir.add("cond", 40, "")
     self.assertEqual([action], self.doBuild(output))
-    self.dir.add("cond", 2, "")
+    self.dir.add("cond", 20, "")
 
     # input newer than output.
-    self.dir.add("input", 4, "")
+    self.dir.add("input", 40, "")
     self.assertEqual([action], self.doBuild(output))
-    self.dir.add("input", 2, "")
+    self.dir.add("input", 20, "")
 
     # condition is true, cond_input doesn't exist.
-    self.dir.add("cond", 2, "true")
+    self.dir.add("cond", 20, "true")
     self.assertEqual([conditional_action, action], self.doBuild(output))
 
     # cond_input newer than output -- doesn't matter since cond is false.
-    self.dir.add("cond_input", 4, "")
-    self.dir.add("cond", 2, "false")
+    self.dir.add("cond_input", 40, "")
+    self.dir.add("cond", 20, "false")
     self.assertEqual([], self.doBuild(output))
 
     # condition is true, cond_input is newer than output.
-    self.dir.add("cond", 2, "true")
+    self.dir.add("cond", 20, "true")
     self.assertEqual([action], self.doBuild(output))
 
     # output newer than cond_input.
-    self.dir.add("cond_input", 2, "")
+    self.dir.add("cond_input", 20, "")
     self.assertEqual([], self.doBuild(output))
 
   def testDerivedCondition(self):
@@ -308,21 +309,21 @@ class BuilderTest(unittest.TestCase):
         condition, [], [conditional_input], [output])
 
     # Condition is false.
-    self.dir.add("cond_dep", 2, "false")
+    self.dir.add("cond_dep", 20, "false")
     self.assertEqual([condition_builder, action], self.doBuild(output))
 
     # Condition is "true" but will become "false" when rebuilt.  This should
     # not cause conditional_action to be triggered because action should not
     # be allowed to read "cond" while it is dirty.
-    self.dir.add("cond_dep", 3, "false")
-    self.dir.add("cond", 2, "true")
+    self.dir.add("cond_dep", 30, "false")
+    self.dir.add("cond", 20, "true")
     self.assertEqual([condition_builder, action], self.doBuild(output))
 
     # Condition is "false" but will become "true" when rebuilt.  This should
     # trigger conditional_action *even though* conditional_input was not listed
     # among the inputs in the first pass.
-    self.dir.add("cond_dep", 3, "true")
-    self.dir.add("cond", 2, "false")
+    self.dir.add("cond_dep", 30, "true")
+    self.dir.add("cond", 20, "false")
     self.assertEqual([condition_builder, conditional_action, action],
                      self.doBuild(output))
 

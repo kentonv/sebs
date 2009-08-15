@@ -62,12 +62,13 @@ import shutil
 import sys
 import threading
 
-from sebs.builder import Builder, SubprocessRunner
+from sebs.builder import Builder
 from sebs.core import Rule, Test
 from sebs.filesystem import DiskDirectory, VirtualDirectory, MappedDirectory
 from sebs.helpers import typecheck
 from sebs.loader import Loader, BuildFile
 from sebs.console import make_console, ColoredText
+from sebs.runner import SubprocessRunner
 
 class UsageError(Exception):
   pass
