@@ -303,11 +303,15 @@ class _ArtifactState(object):
         else:
           for input in action_state.inputs:
             input_state = state_map.artifact_state(input)
-            # TODO(kenton):  Should we round these timestamps to the nearest
-            #   integer since disk filesystems often do that?  Otherwise, when
-            #   comparing a disk file to a mem file we might get false
-            #   positives.  However, I haven't yet seen this happen in practice.
-            if input_state.is_dirty or self.timestamp < input_state.timestamp:
+            # We assume that if the mtimes are within one second of each other
+            # then both artifacts must have been built as part of the same
+            # build.  Even if the input's timestamp is actually newer than this
+            # artifact, we assume that this artifact was actually built
+            # afterwards but some sort of rounding error lead to the difference.
+            # (For example, the disk filesystem may round timestamps to the
+            # nearest second while the mem filesystem keeps exact times.)
+            if input_state.is_dirty or \
+               self.timestamp + 1 < input_state.timestamp:
               self.is_dirty = True
       else:
         self.is_dirty = True
