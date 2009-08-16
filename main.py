@@ -35,6 +35,9 @@
 # Commands:
 #   build:  Builds targets and dependencies.
 #   test:  Builds test rules and executes them.
+#   configure:  Lock-in a set of environment variables that will be used in
+#     subsequent builds.  Should support setting names for different
+#     configurations.
 #   script:  Like build, but generates a script containing the actions instead
 #     of actually building.  Scripts may be in multiple formats, including
 #     Unix shell, Windows batch file, or configure/Makefile pair.
