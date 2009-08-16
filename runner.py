@@ -30,19 +30,15 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import cStringIO
-import collections
 import md5
 import os
 import subprocess
-import sys
 import tempfile
-import threading
-import time
 
 from sebs.core import Action, Artifact, ContentToken
 from sebs.filesystem import Directory
 from sebs.helpers import typecheck
-from sebs.command import CommandContext, Command
+from sebs.command import CommandContext, Command, ArtifactEnumerator
 from sebs.console import ColoredText
 
 class ActionRunner(object):
@@ -51,11 +47,13 @@ class ActionRunner(object):
   def __init__(self):
     pass
 
-  def run(self, action, inputs, outputs, test_result, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, lock):
     """Executes the given action.  Returns true if the command succeeds, false
     if it fails.  |inputs| and |outputs| are lists of artifacts that are the
     inputs and outputs of this action, as determined by calling
-    enumerate_artifacts on the command."""
+    enumerate_artifacts on the command.
+
+    TODO(kenton):  Too many arguments, need to organize better."""
     raise NotImplementedError
 
 class _CommandContextImpl(CommandContext):
@@ -175,7 +173,7 @@ class SubprocessRunner(ActionRunner):
     #   take advantage of that to import SEBS implementation modules.
     self.__env["PYTHONPATH"] = "src"
 
-  def run(self, action, inputs, outputs, test_result, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, lock):
     typecheck(action, Action)
 
     pending_message = self.__console.add_pending([
@@ -246,8 +244,9 @@ class CachingRunner(ActionRunner):
   def restore_cache(self, cache):
     self.__cache = cache
 
-  def run(self, action, inputs, outputs, test_result, lock):
-    (can_skip, hash) = self.__can_skip(action, inputs, outputs, test_result)
+  def run(self, action, inputs, disk_inputs, outputs, test_result, lock):
+    (can_skip, hash) = self.__can_skip(
+        action, inputs, disk_inputs, outputs, test_result)
     if can_skip:
       self.__console.write([
           ColoredText(ColoredText.CYAN, "no changes: "),
@@ -266,18 +265,27 @@ class CachingRunner(ActionRunner):
       # probably be putting these outputs back into the map momentarily.
       self.__cache[output.filename] = None
 
-    result = self.__sub_runner.run(action, inputs, outputs, test_result, lock)
+    result = self.__sub_runner.run(
+        action, inputs, disk_inputs, outputs, test_result, lock)
 
     if result:
-      # Action succeeded, so record it in the cache.
-      if hash is None:
-        hash = self.__hash(action, inputs, outputs)
+      # Action succeeded, so record it in the cache.  First we need to refresh
+      # the disk input list.
+      enumerator = _DiskInputCollector(self.__working_dir)
+      action.command.enumerate_artifacts(enumerator)
+
+      # Must recompute hash if it was not computed before or if the disk inputs
+      # changed.
+      if hash is None or set(disk_inputs) != set(enumerator.disk_inputs):
+        hash = self.__hash(action, inputs, enumerator.disk_inputs, outputs)
+
+      # Set new hash on all outputs.
       for output in outputs:
         self.__cache[output.filename] = hash
 
     return result
 
-  def __can_skip(self, action, inputs, outputs, test_result):
+  def __can_skip(self, action, inputs, disk_inputs, outputs, test_result):
     # There should be no such thing as an action without outputs, but if we
     # see one we'll do the conservative thing and not skip it.
     if len(outputs) == 0:
@@ -293,8 +301,13 @@ class CachingRunner(ActionRunner):
       if self.__cache.get(output.filename) != last_hash:
         return (False, None)
 
+    # All disk inputs must exist.
+    for disk_input in disk_inputs:
+      if not os.path.exists(disk_input):
+        return (False, None)
+
     # Compute new hash and compare.
-    new_hash = self.__hash(action, inputs, outputs)
+    new_hash = self.__hash(action, inputs, disk_inputs, outputs)
     if new_hash != last_hash:
       return (False, new_hash)
 
@@ -306,15 +319,15 @@ class CachingRunner(ActionRunner):
 
     return (True, new_hash)
 
-  def __hash(self, action, inputs, outputs):
+  def __hash(self, action, inputs, disk_inputs, outputs):
     # Security is not a concern here, so MD5 is OK and probably faster than
     # more-secure algorithms.
     hasher = md5.md5()
 
     input_names = [input.filename for input in inputs]
     input_names.sort()
-
     for input in input_names:
+      hasher.update("i")
       hasher.update(str(len(input)))
       hasher.update(" ")
       hasher.update(input)
@@ -324,16 +337,64 @@ class CachingRunner(ActionRunner):
       hasher.update(content)
       content = None
 
+    disk_input_names = list(disk_inputs)
+    disk_input_names.sort()
+    for disk_input in disk_input_names:
+      hasher.update("d")
+      hasher.update(str(len(disk_input)))
+      hasher.update(" ")
+      hasher.update(disk_input)
+      file = open(disk_input, "rU")
+      content = file.read()
+      file.close()
+      hasher.update(str(len(content)))
+      hasher.update(" ")
+      hasher.update(content)
+      content = None
+
     output_names = [output.filename for output in outputs]
     output_names.sort()
-
     for output in output_names:
+      hasher.update("o")
       hasher.update(str(len(output)))
       hasher.update(" ")
       hasher.update(output)
 
     action.command.hash(hasher)
     return hasher.digest()
+
+class _DiskInputCollector(ArtifactEnumerator):
+  def __init__(self, root_dir):
+    typecheck(root_dir, Directory)
+    self.__root_dir = root_dir
+    self.disk_inputs = []
+
+  def add_input(self, artifact):
+    pass
+
+  def add_output(self, artifact):
+    pass
+
+  def add_disk_input(self, filename):
+    self.disk_inputs.append(filename)
+
+  def read(self, artifact):
+    # We assume the artifact is clean since we only use DiskInputCollector after
+    # the command has run, and the command would not have been run if any inputs
+    # were dirty.
+    return self.__root_dir.read(artifact.filename)
+
+  def read_previous_output(self, artifact):
+    if self.__root_dir.exists(artifact.filename):
+      return self.__root_dir.read(artifact.filename)
+    else:
+      return None
+
+  def getenv(self, env_name):
+    if env_name in os.environ:
+      return os.environ[env_name]
+    else:
+      return None
 
 # useful for debugging...
 #

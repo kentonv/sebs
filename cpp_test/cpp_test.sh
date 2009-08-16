@@ -79,6 +79,20 @@ expect_contains $OUTPUT '> compile: src/sebs/cpp_test/foo.cc$'
 expect_contains $OUTPUT '> link: sebs/cpp_test/cpp_test.sebs:foo$'
 expect_contains $OUTPUT '> link: sebs/cpp_test/cpp_test.sebs:prog$'
 
+echo "Touching header and recompiling..."
+
+sleep 2  # Avoid 1-second grace period in timestamp comparison.
+touch src/sebs/cpp_test/foo.h
+expect_success "$SEBS build sebs/cpp_test/cpp_test.sebs:prog &> $OUTPUT"
+
+# Note:  Several of these might be prefixed with "no changes:".
+expect_contains $OUTPUT 'compile: src/sebs/cpp_test/main.cc$'
+expect_contains $OUTPUT 'compile: src/sebs/cpp_test/bar.cc$'
+expect_contains $OUTPUT 'link: sebs/cpp_test/cpp_test.sebs:bar$'
+expect_contains $OUTPUT 'compile: src/sebs/cpp_test/foo.cc$'
+expect_contains $OUTPUT 'link: sebs/cpp_test/cpp_test.sebs:foo$'
+expect_contains $OUTPUT 'link: sebs/cpp_test/cpp_test.sebs:prog$'
+
 echo "Running test binary..."
 
 expect_success '$WORKING/bin/sebs_cpp_test &> $OUTPUT'

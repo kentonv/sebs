@@ -86,10 +86,31 @@ class ArtifactEnumerator(object):
     """Report that the given artifact is an output to the command."""
     raise NotImplementedError
 
+  def add_disk_input(self, filename):
+    """Indicates that if the given file has changed since the last time this
+    command was run, then then the command needs to be re-run, even if none of
+    the inputs added using add_input() have changed.  The file name is an
+    on-disk name, either absolute or relative to the working directory.  Note
+    that if the file no longer exists at all, this is treated the same as if
+    the file had changed."""
+    raise NotImplementedError
+
   def read(self, artifact):
     """If the given artifact exists and is up-to-date, returns its contents as
     a string.  Otherwise, returns None.  Calling this also implies that the
     artifact is an input, as if add_input() were called."""
+    raise NotImplementedError
+
+  def read_previous_output(self, artifact):
+    """Similar to read(), but the artifact is actually an *output* of this
+    command.  If a copy of the artifact exists, left over from a previous
+    build, then its contents will be returned.  Otherwise, returns None.
+
+    This is intended to be used together with add_disk_input() to handle .d
+    files, e.g. as produced by GCC's -MD option.  These files list all of the
+    headers which were included by a C/C++ source file the last time it was
+    compiled; if any of these headers have changed then the source file will
+    need to be recompiled."""
     raise NotImplementedError
 
   def getenv(self, env_name):
@@ -141,6 +162,8 @@ def _hash_string_and_length(string, hasher):
   hasher.update(" ")
   hasher.update(string)
 
+# ====================================================================
+
 class EchoCommand(Command):
   """Command which simply writes a string into an artifact."""
 
@@ -167,6 +190,8 @@ class EchoCommand(Command):
     hasher.update("EchoCommand:")
     _hash_string_and_length(self.__content, hasher)
     _hash_string_and_length(self.__output_artifact.filename, hasher)
+
+# ====================================================================
 
 class EnvironmentCommand(Command):
   """Command which reads an environment variable and writes the contents into
@@ -230,6 +255,8 @@ class EnvironmentCommand(Command):
       hasher.update("s")
       _hash_string_and_length(self.__default, hasher)
 
+# ====================================================================
+
 class DoAllCommand(Command):
   """Command which simply executes some list of commands in order."""
 
@@ -259,6 +286,8 @@ class DoAllCommand(Command):
     hasher.update(" ")
     for command in self.__subcommands:
       command.hash(hasher)
+
+# ====================================================================
 
 class ConditionalCommand(Command):
   """Command which first checks if the contents of some artifact.  The contents
@@ -324,6 +353,8 @@ class ConditionalCommand(Command):
     else:
       hasher.update("+")
       self.__false_command.hash(hasher)
+
+# ====================================================================
 
 class SubprocessCommand(Command):
   """Command which launches a separate process."""
@@ -546,3 +577,41 @@ class SubprocessCommand(Command):
         self.__hash_args(arg, hasher)
       else:
         raise AssertionError("Invalid argument.")
+
+# ====================================================================
+
+class DepFileCommand(Command):
+  """A Command which produces a dependency list as part of its execution, e.g.
+  as GCC does when given the -MD command-line flag.  Wraps some other command
+  that does the actual work."""
+
+  def __init__(self, real_command, dep_artifact):
+    typecheck(real_command, Command)
+    typecheck(dep_artifact, Artifact)
+    self.__command = real_command
+    self.__dep_artifact = dep_artifact
+
+  def enumerate_artifacts(self, artifact_enumerator):
+    self.__command.enumerate_artifacts(artifact_enumerator)
+
+    dep_text = artifact_enumerator.read_previous_output(self.__dep_artifact)
+    if dep_text is not None:
+      # Parse text that looks like:
+      #   foo.o: foo.h bar.h \
+      #     baz.h qux.h
+      dep_text = dep_text.replace("\\\n", " ")  # remove escaped newlines
+      parts = dep_text.split()
+      for part in parts:
+        # Skip tokens like "foo.o:".  The rest are files.
+        if not part.endswith(":"):
+          artifact_enumerator.add_disk_input(part)
+
+  def run(self, context, log):
+    return self.__command.run(context, log)
+
+  def print_(self, output):
+    self.__command.print_(output)
+
+  def hash(self, hasher):
+    hasher.update("DepFileCommand:")
+    self.__command.hash(hasher)

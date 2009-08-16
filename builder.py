@@ -29,12 +29,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import cStringIO
 import collections
 import os
-import subprocess
-import sys
-import tempfile
 import threading
 import time
 
@@ -46,14 +42,20 @@ from sebs.console import ColoredText
 from sebs.runner import ActionRunner
 
 class _ArtifactEnumeratorImpl(ArtifactEnumerator):
-  def __init__(self, state_map, root_dir):
+  # WARNING:  If you modify this class, see also _DiskInputCollector in
+  #   runner.py.  TODO(kenton):  Share code better or something.
+
+  def __init__(self, state_map, root_dir, action):
     typecheck(state_map, _StateMap)
     typecheck(root_dir, Directory)
+    typecheck(action, Action)
 
     self.__state_map = state_map
     self.__root_dir = root_dir
+    self.__action = action
     self.inputs = []
     self.outputs = []
+    self.disk_inputs = []
 
   def add_input(self, artifact):
     self.inputs.append(artifact)
@@ -61,12 +63,25 @@ class _ArtifactEnumeratorImpl(ArtifactEnumerator):
   def add_output(self, artifact):
     self.outputs.append(artifact)
 
+  def add_disk_input(self, filename):
+    self.disk_inputs.append(filename)
+
   def read(self, artifact):
     self.inputs.append(artifact)
     if self.__state_map.artifact_state(artifact).is_dirty:
       return None
     else:
       return self.__root_dir.read(artifact.filename)
+
+  def read_previous_output(self, artifact):
+    if artifact.action is not self.__action:
+      raise DefinitionError("%s is not an output of %s." %
+                            (artifact, self.__action))
+
+    if self.__root_dir.exists(artifact.filename):
+      return self.__root_dir.read(artifact.filename)
+    else:
+      return None
 
   def getenv(self, env_name):
     if env_name in os.environ:
@@ -118,12 +133,69 @@ class _ArtifactState(object):
             if input_state.is_dirty or \
                self.timestamp + 1 < input_state.timestamp:
               self.is_dirty = True
+              break
+
+          if not self.is_dirty:
+            # Check disk inputs, too.
+            for disk_input in action_state.disk_inputs:
+              disk_timestamp = os.path.getmtime(disk_input)
+              if self.timestamp + 1 < disk_timestamp:
+                self.is_dirty = True
+                break
       else:
         self.is_dirty = True
 
       # Also mark dirty if the build definition file has changed.
       if self.timestamp < artifact.action.rule.context.timestamp:
         self.is_dirty = True
+
+  def __decide_if_dirty(self):
+    action_state = state_map.action_state(self.artifact.action)
+
+    # If the creating action is not ready, then some of its inputs are dirty,
+    # which in turn means this artifact is dirty.
+    if not action_state.is_ready:
+      return True
+
+    if self.artifact not in action_state.outputs:
+      # The action that normally builds this artifact is not planning to
+      # do so.  This is not necessarily an error -- this artifact may be
+      # a conditional output of said action which is not built under the
+      # current configuration.  Hopefully this artifact will not actually
+      # be used.  We mark it dirty to prevent any actions that depend on it
+      # from running.
+      # TODO(kenton):  If the code gets here, does that mean the artifact is
+      #   definitely going to be used?  If so, we could throw an error.
+      return True
+
+    # Check if any inputs are newer than this artifact.
+    for input in action_state.inputs:
+      input_state = state_map.artifact_state(input)
+      # We assume that if the mtimes are within one second of each other
+      # then both artifacts must have been built as part of the same
+      # build.  Even if the input's timestamp is actually newer than this
+      # artifact, we assume that this artifact was actually built
+      # afterwards but some sort of rounding error lead to the difference.
+      # (For example, the disk filesystem may round timestamps to the
+      # nearest second while the mem filesystem keeps exact times.)
+      if input_state.is_dirty or \
+         self.timestamp + 1 < input_state.timestamp:
+        return True
+
+    # Check disk inputs, too.
+    for disk_input in action_state.disk_inputs:
+      if not os.path.exists(disk_input):
+        return True
+      disk_timestamp = os.path.getmtime(disk_input)
+      # See above comment about rounding error.
+      if self.timestamp + 1 < disk_timestamp:
+        return True
+
+    # Also mark dirty if the build definition file has changed.  (Since build
+    # def files cannot be derived files we don't need to worry about rounding
+    # error on this one.)
+    if self.timestamp < artifact.action.rule.context.timestamp:
+      self.is_dirty = True
 
 class _ActionState(object):
   def __init__(self, action, root_dir, state_map):
@@ -170,7 +242,7 @@ class _ActionState(object):
       # Already ready.  No change is possible.
       return False
 
-    enumerator = _ArtifactEnumeratorImpl(state_map, root_dir)
+    enumerator = _ArtifactEnumeratorImpl(state_map, root_dir, self.action)
     self.action.command.enumerate_artifacts(enumerator)
 
     self.blocking = set()
@@ -191,6 +263,7 @@ class _ActionState(object):
 
     self.is_ready = True
     self.inputs = enumerator.inputs
+    self.disk_inputs = enumerator.disk_inputs
     self.outputs = enumerator.outputs
     return True
 
@@ -310,6 +383,7 @@ class Builder(object):
           test_result = action_state.test.test_result_artifact
         self.__num_pending = self.__num_pending - 1
         if not action_runner.run(action, action_state.inputs,
+                                         action_state.disk_inputs,
                                          action_state.outputs,
                                          test_result,
                                          self.__lock):

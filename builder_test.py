@@ -47,7 +47,7 @@ class MockRunner(ActionRunner):
     self.actions = []
     self.__dir = dir
 
-  def run(self, action, inputs, outputs, test_result, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, lock):
     self.actions.append(action)
 
     # Hack for testDerivedCondition:  If the action is condition_builder then
