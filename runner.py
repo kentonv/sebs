@@ -250,9 +250,9 @@ class CachingRunner(ActionRunner):
     self.__console = console
     self.__cache = {}
 
-  def save_cache(self):
+  def save(self):
     return self.__cache
-  def restore_cache(self, cache):
+  def restore(self, cache):
     self.__cache = cache
 
   def run(self, action, inputs, disk_inputs, outputs, test_result, lock):

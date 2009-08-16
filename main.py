@@ -124,6 +124,19 @@ def _args_to_rules(loader, args):
     else:
       yield target
 
+def _restore_pickle(obj, filename):
+  if os.path.exists(filename):
+    db = open(filename, "rb")
+    obj.restore(cPickle.load(db))
+    db.close()
+
+def _save_pickle(obj, filename):
+  db = open(filename, "wb")
+  cPickle.dump(obj.save(), db, cPickle.HIGHEST_PROTOCOL)
+  db.close()
+
+# ====================================================================
+
 def build(root_dir, argv):
   try:
     opts, args = getopt.getopt(argv[1:], "vj:", [])
@@ -147,10 +160,7 @@ def build(root_dir, argv):
     caching_runner = CachingRunner(runner, root_dir, console)
     runner = caching_runner
 
-    if os.path.exists("cache.pickle"):
-      db = open("cache.pickle", "rb")
-      caching_runner.restore_cache(cPickle.load(db))
-      db.close()
+    _restore_pickle(caching_runner, "cache.pickle")
 
   loader = Loader(root_dir)
   builder = Builder(root_dir, console)
@@ -179,9 +189,7 @@ def build(root_dir, argv):
     for thread in thread_objects:
       thread.join()
   finally:
-    db = open("cache.pickle", "wb")
-    cPickle.dump(caching_runner.save_cache(), db, cPickle.HIGHEST_PROTOCOL)
-    db.close()
+    _save_pickle(caching_runner, "cache.pickle")
 
   if builder.failed:
     return 1
@@ -228,10 +236,7 @@ def main(argv):
   if len(args) == 0:
     raise UsageError("Missing command.")
 
-  if os.path.exists("mem.pickle"):
-    db = open("mem.pickle", "rb")
-    mem_dir.restore(cPickle.load(db))
-    db.close()
+  _restore_pickle(mem_dir, "mem.pickle")
 
   save_mem = True
 
@@ -245,12 +250,7 @@ def main(argv):
       raise UsageError("Unknown command: %s" % args[0])
   finally:
     if save_mem:
-      db = open("mem.pickle", "wb")
-      cPickle.dump(mem_dir.save(), db, cPickle.HIGHEST_PROTOCOL)
-      db.close()
-    else:
-      if os.path.exists("mem.pickle"):
-        os.remove("mem.pickle")
+      _save_pickle(mem_dir, "mem.pickle")
 
 if __name__ == "__main__":
   try:
