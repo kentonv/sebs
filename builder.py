@@ -349,6 +349,9 @@ class Builder(object):
         # sources of both libraries before linking either one.
         newly_ready.reverse()
         self.__action_queue.extendleft(newly_ready)
+    except:
+      self.failed = True
+      raise
     finally:
       self.__lock.release()
 

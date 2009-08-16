@@ -124,6 +124,23 @@ class Command(CommandBase):
     text should be written to the given output stream."""
     raise NotImplementedError
 
+  def hash(self, hasher):
+    """Feeds information to the given hasher which uniquely describes this
+    command, so that two commands with the same hash must (barring hash
+    collisions) be the same command.  The hasher type is one of those
+    provided by the Python hashlib module, or something implementing the
+    same interface.  Typically the first thing a hash() method should do
+    is call hasher.update() with the command class's own type name.  As a
+    rule of thumb, the data you feed to the hasher should be such that it
+    would be possible to parse that data in order to reproduce the action,
+    although you do not actually need to write any such parser."""
+    raise NotImplementedError
+
+def _hash_string_and_length(string, hasher):
+  hasher.update(str(len(string)))
+  hasher.update(" ")
+  hasher.update(string)
+
 class EchoCommand(Command):
   """Command which simply writes a string into an artifact."""
 
@@ -145,6 +162,11 @@ class EchoCommand(Command):
   def print_(self, output):
     output.write("echo '%s' > %s\n" %
         (self.__content, self.__output_artifact.filename))
+
+  def hash(self, hasher):
+    hasher.update("EchoCommand:")
+    _hash_string_and_length(self.__content, hasher)
+    _hash_string_and_length(self.__output_artifact.filename, hasher)
 
 class EnvironmentCommand(Command):
   """Command which reads an environment variable and writes the contents into
@@ -195,6 +217,19 @@ class EnvironmentCommand(Command):
           (self.__env_name, self.__default.filename,
            self.__output_artifact.filename))
 
+  def hash(self, hasher):
+    hasher.update("EnvironmentCommand:")
+    _hash_string_and_length(self.__env_name, hasher)
+    _hash_string_and_length(self.__output_artifact.filename, hasher)
+    if self.__default is None:
+      hasher.update("x")
+    elif isinstance(self.__default, Artifact):
+      hasher.update("f")
+      _hash_string_and_length(self.__default.filename, hasher)
+    else:
+      hasher.update("s")
+      _hash_string_and_length(self.__default, hasher)
+
 class DoAllCommand(Command):
   """Command which simply executes some list of commands in order."""
 
@@ -217,6 +252,13 @@ class DoAllCommand(Command):
   def print_(self, output):
     for command in self.__subcommands:
       command.print_(output)
+
+  def hash(self, hasher):
+    hasher.update("DoAllCommand:")
+    hasher.update(str(len(self.__subcommands)))
+    hasher.update(" ")
+    for command in self.__subcommands:
+      command.hash(hasher)
 
 class ConditionalCommand(Command):
   """Command which first checks if the contents of some artifact.  The contents
@@ -272,6 +314,16 @@ class ConditionalCommand(Command):
     if lines[-1] == "":
       lines.pop()
     return "  %s\n" % "\n  ".join(lines)
+
+  def hash(self, hasher):
+    hasher.update("ConditionalCommand:")
+    _hash_string_and_length(self.__condition_artifact.filename, hasher)
+    self.__true_command.hash(hasher)
+    if self.__false_command is None:
+      hasher.update("-")
+    else:
+      hasher.update("+")
+      self.__false_command.hash(hasher)
 
 class SubprocessCommand(Command):
   """Command which launches a separate process."""
@@ -443,5 +495,54 @@ class SubprocessCommand(Command):
       elif isinstance(arg, list):
         yield "".join(self.__format_args(
             arg, context, split_content = False))
+      else:
+        raise AssertionError("Invalid argument.")
+
+  def hash(self, hasher):
+    hasher.update("SubprocessCommand:")
+    self.__hash_args(self.__args, hasher)
+    if self.__capture_stdout is not None:
+      hasher.update(">");
+      _hash_string_and_length(self.__capture_stdout.filename, hasher)
+    if self.__capture_stderr is not None:
+      hasher.update("&");
+      _hash_string_and_length(self.__capture_stderr.filename, hasher)
+    if self.__capture_exit_status is not None:
+      hasher.update("?");
+      _hash_string_and_length(self.__capture_exit_status.filename, hasher)
+
+    # Hash implicit files in sorted order so that use of hash sets by the
+    # creator doesn't cause problems.
+    implicit_names = []
+    for implicit in self.__implicit_artifacts:
+      if implicit.action is self.__action:
+        implicit_names.append("+" + implicit.filename)
+      else:
+        implicit_names.append("-" + implicit.filename)
+    implicit_names.sort()
+    for implicit in implicit_names:
+      _hash_string_and_length(implicit, hasher)
+
+    hasher.update(".")
+
+  def __hash_args(self, args, hasher):
+    hasher.update(str(len(args)))
+    hasher.update(" ")
+    for arg in args:
+      if isinstance(arg, basestring):
+        hasher.update("s")
+        _hash_string_and_length(arg, hasher)
+      elif isinstance(arg, Artifact):
+        if arg.action is self.__action:
+          hasher.update("o")
+        else:
+          hasher.update("i")
+        _hash_string_and_length(arg.filename, hasher)
+      elif isinstance(arg, ContentToken):
+        hasher.update("c")
+        _hash_string_and_length(arg.artifact.filename, hasher)
+      elif isinstance(arg, list):
+        hasher.update("l")
+        self.__hash_args(arg, hasher)
       else:
         raise AssertionError("Invalid argument.")

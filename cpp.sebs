@@ -218,6 +218,12 @@ class Binary(_Base):
 
     lib_flags = ["-l" + lib for lib in self.transitive_libs]
 
+    # Make sure dependency order is deterministic.
+    # TODO(kenton):  Should we sort such that every library appears before its
+    #   dependencies rather than alphabetical?
+    all_inputs.sort()
+    lib_flags.sort()
+
     link_action.set_command(
       sebs.SubprocessCommand(link_action,
         [cxx.value, "-o", output] + all_inputs + lib_flags))

@@ -31,6 +31,7 @@
 
 import cStringIO
 import collections
+import md5
 import os
 import subprocess
 import sys
@@ -178,7 +179,7 @@ class SubprocessRunner(ActionRunner):
     typecheck(action, Action)
 
     pending_message = self.__console.add_pending([
-        ColoredText(ColoredText.BLUE, action.verb + ": "), action.name])
+        ColoredText(ColoredText.BLUE, [action.verb, ": "]), action.name])
 
     # Make sure the output directories exist.
     # TODO(kenton):  Also delete output files from previous runs?
@@ -230,6 +231,118 @@ class SubprocessRunner(ActionRunner):
       except Exception:
         pass
 
-# TODO(kenton):  ActionRunner which checks if the inputs have actually changed
-#   (e.g. by hashing them) and skips the action if not (just touches the
-#   outputs).
+# ====================================================================
+
+class CachingRunner(ActionRunner):
+  def __init__(self, sub_runner, working_dir, console):
+    typecheck(sub_runner, ActionRunner)
+    self.__sub_runner = sub_runner
+    self.__working_dir = working_dir
+    self.__console = console
+    self.__cache = {}
+
+  def save_cache(self):
+    return self.__cache
+  def restore_cache(self, cache):
+    self.__cache = cache
+
+  def run(self, action, inputs, outputs, test_result, lock):
+    (can_skip, hash) = self.__can_skip(action, inputs, outputs, test_result)
+    if can_skip:
+      self.__console.write([
+          ColoredText(ColoredText.CYAN, "no changes: "),
+          ColoredText(ColoredText.BLUE, [action.verb, ": "]),
+          action.name])
+
+      # Update timestamps so that the builder does not even mark these files
+      # dirty if we immediately build again.
+      for output in outputs:
+        self.__working_dir.touch(output.filename)
+      return True
+
+    # Clear all outputs from cache since the cached value is now invalid.
+    for output in outputs:
+      # Set to None instead of actually removing from the map because we'll
+      # probably be putting these outputs back into the map momentarily.
+      self.__cache[output.filename] = None
+
+    result = self.__sub_runner.run(action, inputs, outputs, test_result, lock)
+
+    if result:
+      # Action succeeded, so record it in the cache.
+      if hash is None:
+        hash = self.__hash(action, inputs, outputs)
+      for output in outputs:
+        self.__cache[output.filename] = hash
+
+    return result
+
+  def __can_skip(self, action, inputs, outputs, test_result):
+    # There should be no such thing as an action without outputs, but if we
+    # see one we'll do the conservative thing and not skip it.
+    if len(outputs) == 0:
+      return (False, None)
+
+    # Look up the hash of the action which produced these outputs last time.
+    last_hash = self.__cache.get(outputs[0].filename)
+    if last_hash is None:
+      return (False, None)    # Nothing in cache, must re-run.
+
+    # All outputs must have the same hash.
+    for output in outputs[1:]:
+      if self.__cache.get(output.filename) != last_hash:
+        return (False, None)
+
+    # Compute new hash and compare.
+    new_hash = self.__hash(action, inputs, outputs)
+    if new_hash != last_hash:
+      return (False, new_hash)
+
+    # Make sure all outputs exist.  We do this last to avoid touching the
+    # filesystem when we don't have to.
+    for output in outputs:
+      if not self.__working_dir.exists(output.filename):
+        return (False, new_hash)
+
+    return (True, new_hash)
+
+  def __hash(self, action, inputs, outputs):
+    # Security is not a concern here, so MD5 is OK and probably faster than
+    # more-secure algorithms.
+    hasher = md5.md5()
+
+    input_names = [input.filename for input in inputs]
+    input_names.sort()
+
+    for input in input_names:
+      hasher.update(str(len(input)))
+      hasher.update(" ")
+      hasher.update(input)
+      content = self.__working_dir.read(input)
+      hasher.update(str(len(content)))
+      hasher.update(" ")
+      hasher.update(content)
+      content = None
+
+    output_names = [output.filename for output in outputs]
+    output_names.sort()
+
+    for output in output_names:
+      hasher.update(str(len(output)))
+      hasher.update(" ")
+      hasher.update(output)
+
+    action.command.hash(hasher)
+    return hasher.digest()
+
+# useful for debugging...
+#
+#class HashInterceptor(object):
+#  def __init__(self, hasher):
+#    self.__hasher = hasher
+#    self.__out = cStringIO.StringIO()
+#  def update(self, data):
+#    self.__hasher.update(data)
+#    self.__out.write(data)
+#  def content(self):
+#    return self.__out.getvalue()

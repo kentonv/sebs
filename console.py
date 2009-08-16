@@ -47,7 +47,6 @@ class ColoredText(object):
 
   def __init__(self, color, text):
     typecheck(color, int)
-    typecheck(text, basestring)
     self.color = color
     self.text = text
 

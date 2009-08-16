@@ -68,7 +68,7 @@ from sebs.filesystem import DiskDirectory, VirtualDirectory, MappedDirectory
 from sebs.helpers import typecheck
 from sebs.loader import Loader, BuildFile
 from sebs.console import make_console, ColoredText
-from sebs.runner import SubprocessRunner
+from sebs.runner import SubprocessRunner, CachingRunner
 
 class UsageError(Exception):
   pass
@@ -128,6 +128,7 @@ def build(root_dir, argv):
     raise UsageError(message)
 
   runner = None
+  caching_runner = None
   verbose = False
   console = make_console(sys.stdout)
   threads = 1
@@ -140,6 +141,13 @@ def build(root_dir, argv):
 
   if runner is None:
     runner = SubprocessRunner(root_dir, console, verbose)
+    caching_runner = CachingRunner(runner, root_dir, console)
+    runner = caching_runner
+
+    if os.path.exists("cache.pickle"):
+      db = open("cache.pickle", "rb")
+      caching_runner.restore_cache(cPickle.load(db))
+      db.close()
 
   loader = Loader(root_dir)
   builder = Builder(root_dir, console)
@@ -167,6 +175,10 @@ def build(root_dir, argv):
     builder.failed = True
     for thread in thread_objects:
       thread.join()
+  finally:
+    db = open("cache.pickle", "wb")
+    cPickle.dump(caching_runner.save_cache(), db, cPickle.HIGHEST_PROTOCOL)
+    db.close()
 
   if builder.failed:
     return 1
@@ -185,6 +197,10 @@ def clean(root_dir, argv):
   for dir in ["tmp", "bin", "lib", "share"]:
     if root_dir.exists(dir):
       shutil.rmtree(root_dir.get_disk_path(dir))
+
+  for file in [ "mem.pickle", "cache.pickle" ]:
+    if os.path.exists(file):
+      os.remove(file)
 
 def main(argv):
   try:
