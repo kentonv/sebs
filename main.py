@@ -170,9 +170,9 @@ def build(root_dir, argv):
     for thread in thread_objects:
       thread.join()
   except KeyboardInterrupt:
-    console.write(ColoredText(ColoredText.RED,
-        "Caught keyboard interrupt, shutting down."))
-    builder.failed = True
+    if not builder.failed:
+      console.write(ColoredText(ColoredText.RED, "INTERRUPTED"))
+      builder.failed = True
     for thread in thread_objects:
       thread.join()
   finally:

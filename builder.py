@@ -423,6 +423,10 @@ class Builder(object):
         # sources of both libraries before linking either one.
         newly_ready.reverse()
         self.__action_queue.extendleft(newly_ready)
+    except KeyboardInterrupt:
+      if not self.failed:
+        self.__console.write(ColoredText(ColoredText.RED, "INTERRUPTED"))
+      self.failed = True
     except:
       self.failed = True
       raise

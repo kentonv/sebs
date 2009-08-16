@@ -34,6 +34,7 @@ import md5
 import os
 import subprocess
 import tempfile
+import signal
 
 from sebs.core import Action, Artifact, ContentToken
 from sebs.filesystem import Directory
@@ -129,18 +130,19 @@ class _CommandContextImpl(CommandContext):
     self.__lock.release()
     try:
       stdout_str, stderr_str = proc.communicate(stdin_str)
-      return (proc.returncode, stdout_str, stderr_str)
     except:
       # Kill the process if it is still running.
-      # Only available on python 2.6 and later.
-      if "kill" in proc.__dict__:
-        try:
-          proc.kill()
-        except:
-          pass
+      # Note:  Can't use proc.kill() because it's too new.
+      os.kill(proc.pid, signal.SIGKILL)
       raise
     finally:
       self.__lock.acquire()
+
+    if proc.returncode == -signal.SIGINT:
+      # Subprocess was killed due to ctrl+C.
+      raise KeyboardInterrupt
+
+    return (proc.returncode, stdout_str, stderr_str)
 
   def status(self, text):
     self.__original_text.append(" ")
@@ -206,10 +208,19 @@ class SubprocessRunner(ActionRunner):
             [ColoredText(ColoredText.RED, "ERROR: ")] + final_text)
 
         return False
+    except KeyboardInterrupt:
+      # Like above.
+      context.resolve_mem_files()
+      self.__reset_mtime(outputs)
+      pending_message.finish(
+            [ColoredText(ColoredText.RED, "CANCEL: "), pending_message.text])
+      raise
     except:
       # Like above.
       context.resolve_mem_files()
       self.__reset_mtime(outputs)
+      pending_message.finish(
+            [ColoredText(ColoredText.RED, "ERROR: "), pending_message.text])
       raise
 
     if test_result is not None:
