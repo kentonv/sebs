@@ -38,7 +38,7 @@ import os
 import subprocess
 
 from sebs.core import Artifact, Action, DefinitionError, ContentToken, \
-                      CommandBase
+                      CommandBase, Context
 from sebs.helpers import typecheck
 
 class CommandContext(object):
@@ -55,11 +55,6 @@ class CommandContext(object):
 
   def write(self, artifact, content):
     """Replace the artifact's contents with the given string."""
-    raise NotImplementedError
-
-  def getenv(self, env_name):
-    """Returns the value of the given environment variable, or None if not
-    set."""
     raise NotImplementedError
 
   def subprocess(self, args, **kwargs):
@@ -111,12 +106,6 @@ class ArtifactEnumerator(object):
     headers which were included by a C/C++ source file the last time it was
     compiled; if any of these headers have changed then the source file will
     need to be recompiled."""
-    raise NotImplementedError
-
-  def getenv(self, env_name):
-    """Returns the value of the given environment variable, or None if not
-    set.  When the command is run, CommandContext.getenv() must return the
-    same value."""
     raise NotImplementedError
 
 class Command(CommandBase):
@@ -199,35 +188,43 @@ class EnvironmentCommand(Command):
   The default value may be a simple string or it may be another artifact -- in
   the latter case, the artifact's contents are copied into the output."""
 
-  def __init__(self, env_name, output_artifact, default=None,
+  def __init__(self, rule_context, env_name, output_artifact, default=None,
                set_status=False):
+    typecheck(rule_context, Context)
     typecheck(env_name, str)
     typecheck(output_artifact, Artifact)
     typecheck(default, [str, Artifact])
+
     self.__env_name = env_name
+    self.__env_artifact = rule_context.environment_artifact(env_name)
+    self.__env_set_artifact = rule_context.environment_set_artifact(env_name)
     self.__output_artifact = output_artifact
     self.__default = default
     self.__set_status = set_status
 
   def enumerate_artifacts(self, artifact_enumerator):
     typecheck(artifact_enumerator, ArtifactEnumerator)
-    if self.__default is not None and \
-       isinstance(self.__default, Artifact) and \
-       artifact_enumerator.getenv(self.__env_name) is None:
+
+    if artifact_enumerator.read(self.__env_set_artifact) == "true":
+      artifact_enumerator.add_input(self.__env_artifact)
+    elif self.__default is not None and isinstance(self.__default, Artifact):
       artifact_enumerator.add_input(self.__default)
+
     artifact_enumerator.add_output(self.__output_artifact)
 
   def run(self, context, log):
     typecheck(context, CommandContext)
-    value = context.getenv(self.__env_name)
-    if value is None:
-      if self.__default is None:
-        log.write("Environment variable not set: %s\n" % self.__env_name)
-        return False
-      elif isinstance(self.__default, Artifact):
-        value = context.read(self.__default)
-      else:
-        value = self.__default
+
+    if context.read(self.__env_set_artifact) == "true":
+      value = context.read(self.__env_artifact)
+    elif self.__default is None:
+      log.write("Environment variable not set: %s\n" % self.__env_name)
+      return False
+    elif isinstance(self.__default, Artifact):
+      value = context.read(self.__default)
+    else:
+      value = self.__default
+
     context.write(self.__output_artifact, value)
     if self.__set_status:
       context.status(value)
@@ -237,9 +234,13 @@ class EnvironmentCommand(Command):
     if self.__default is None:
       output.write("echo $%s > %s\n" %
           (self.__env_name, self.__output_artifact.filename))
+    elif isinstance(self.__default, Artifact):
+      output.write("echo ${%s:$(%s)} > %s\n" %
+          (self.__env_name, self.__default.filename,
+           self.__output_artifact.filename))
     else:
       output.write("echo ${%s:%s} > %s\n" %
-          (self.__env_name, self.__default.filename,
+          (self.__env_name, self.__default,
            self.__output_artifact.filename))
 
   def hash(self, hasher):

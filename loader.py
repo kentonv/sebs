@@ -71,6 +71,18 @@ class _ContextImpl(Context):
     return self.__loader.source_artifact(
       os.path.join("src", self.directory, filename))
 
+  def environment_artifact(self, env_name):
+    self.__validate_env_name(env_name)
+
+    return self.__loader.source_artifact(
+      os.path.join("env", env_name))
+
+  def environment_set_artifact(self, env_name):
+    self.__validate_env_name(env_name)
+
+    return self.__loader.source_artifact(
+      os.path.join("env/set", env_name))
+
   def intermediate_artifact(self, filename, action):
     self.__validate_artifact_name(filename)
     typecheck(action, Action)
@@ -113,6 +125,12 @@ class _ContextImpl(Context):
         "File '%s' points outside the surrounding directory.  To "
         "include a file from another directory, that directory must explicitly "
         "export it." % filename)
+
+  def __validate_env_name(self, name):
+    typecheck(name, basestring)
+    if not name.replace("_", "").isalnum():
+      raise DefinitionError(
+        "'%s' is not a valid environment  variable name" % name)
 
 class BuildFile(object):
   def __init__(self, vars):

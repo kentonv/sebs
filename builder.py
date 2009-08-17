@@ -83,12 +83,6 @@ class _ArtifactEnumeratorImpl(ArtifactEnumerator):
     else:
       return None
 
-  def getenv(self, env_name):
-    if env_name in os.environ:
-      return os.environ[env_name]
-    else:
-      return None
-
 class _ArtifactState(object):
   def __init__(self, artifact, root_dir, state_map):
     typecheck(artifact, Artifact)

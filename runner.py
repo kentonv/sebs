@@ -109,12 +109,6 @@ class _CommandContextImpl(CommandContext):
     else:
       self.__working_dir.write(filename, content)
 
-  def getenv(self, env_name):
-    if env_name in os.environ:
-      return os.environ[env_name]
-    else:
-      return None
-
   def subprocess(self, args, **kwargs):
     if self.__verbose:
       self.__verbose_text.append("\n  ")
@@ -398,12 +392,6 @@ class _DiskInputCollector(ArtifactEnumerator):
   def read_previous_output(self, artifact):
     if self.__root_dir.exists(artifact.filename):
       return self.__root_dir.read(artifact.filename)
-    else:
-      return None
-
-  def getenv(self, env_name):
-    if env_name in os.environ:
-      return os.environ[env_name]
     else:
       return None
 

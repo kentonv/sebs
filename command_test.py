@@ -34,7 +34,7 @@ import cStringIO
 import subprocess
 import unittest
 
-from sebs.core import Artifact, Action, DefinitionError, ContentToken
+from sebs.core import Artifact, Action, DefinitionError, ContentToken, Context
 from sebs.command import CommandContext, ArtifactEnumerator, Command, \
                          EchoCommand, EnvironmentCommand, DoAllCommand, \
                          ConditionalCommand, SubprocessCommand
@@ -46,9 +46,8 @@ def _print_command(command):
   return out.getvalue()
 
 class MockCommandContext(CommandContext):
-  def __init__(self, dir, env = {}, diskpath_prefix = None):
+  def __init__(self, dir, diskpath_prefix = None):
     self.__dir = dir
-    self.__env = env
     self.subprocess_args = None
     self.subprocess_kwargs = None
     self.subprocess_result = (0, "", None)
@@ -69,22 +68,27 @@ class MockCommandContext(CommandContext):
   def write(self, artifact, content):
     self.__dir.write(artifact.filename, content)
 
-  def getenv(self, env_name):
-    if env_name in self.__env:
-      return self.__env[env_name]
-    else:
-      return None
-
   def subprocess(self, args, **kwargs):
     assert self.subprocess_kwargs is None  # Should not call twice.
     self.subprocess_args = args
     self.subprocess_kwargs = kwargs
     return self.subprocess_result
 
+class MockRuleContext(Context):
+  def __init__(self, *kwargs):
+    self.__map = {}
+    for artifact in kwargs:
+      self.__map[artifact.filename] = artifact
+
+  def environment_artifact(self, env_name):
+    return self.__map["env/" + env_name]
+
+  def environment_set_artifact(self, env_name):
+    return self.__map["env/set/" + env_name]
+
 class MockArtifactEnumerator(ArtifactEnumerator):
-  def __init__(self, readable_artifacts = {}, env = {}):
+  def __init__(self, readable_artifacts = {}):
     self.readable_artifacts = readable_artifacts
-    self.env = env
     self.reads = []
     self.inputs = []
     self.outputs = []
@@ -99,12 +103,6 @@ class MockArtifactEnumerator(ArtifactEnumerator):
     self.reads.append(artifact)
     if artifact in self.readable_artifacts:
       return self.readable_artifacts[artifact]
-    else:
-      return None
-
-  def getenv(self, env_name):
-    if env_name in self.env:
-      return self.env[env_name]
     else:
       return None
 
@@ -150,22 +148,33 @@ class CommandTest(unittest.TestCase):
 
   def testEnvironmentCommand(self):
     dir = VirtualDirectory()
+    bar = Artifact("env/BAR", None)
+    bar_set = Artifact("env/set/BAR", None)
     output = Artifact("foo", None)
-    command = EnvironmentCommand("BAR", output)
+    command = EnvironmentCommand(MockRuleContext(bar, bar_set), "BAR", output)
 
-    enumerator = MockArtifactEnumerator()
+    enumerator = MockArtifactEnumerator({bar_set: "false"})
     command.enumerate_artifacts(enumerator)
-    self.assertEquals([], enumerator.reads)
+    self.assertEquals([bar_set], enumerator.reads)
     self.assertEquals([], enumerator.inputs)
     self.assertEquals([output], enumerator.outputs)
 
-    context = MockCommandContext(dir, {})
+    enumerator = MockArtifactEnumerator({bar_set: "true"})
+    command.enumerate_artifacts(enumerator)
+    self.assertEquals([bar_set], enumerator.reads)
+    self.assertEquals([bar], enumerator.inputs)
+    self.assertEquals([output], enumerator.outputs)
+
+    context = MockCommandContext(dir)
+
+    dir.write("env/set/BAR", "false")
     log = cStringIO.StringIO()
     self.assertFalse(command.run(context, log))
     self.assertFalse(dir.exists("foo"))
     self.assertEquals("Environment variable not set: BAR\n", log.getvalue())
 
-    context = MockCommandContext(dir, {"BAR": "baz"})
+    dir.write("env/set/BAR", "true")
+    dir.write("env/BAR", "baz")
     log = cStringIO.StringIO()
     self.assertTrue(command.run(context, log))
     self.assertEquals("baz", dir.read("foo"))
@@ -174,38 +183,44 @@ class CommandTest(unittest.TestCase):
     self.assertEquals("echo $BAR > foo\n", _print_command(command))
 
   def testEnvironmentCommandWithDefault(self):
-    dir = VirtualDirectory()
+    bar = Artifact("env/BAR", None)
+    bar_set = Artifact("env/set/BAR", None)
     default = Artifact("default", None)
     output = Artifact("foo", None)
-    command = EnvironmentCommand("BAR", output, default)
+    command = EnvironmentCommand(MockRuleContext(bar, bar_set),
+                                 "BAR", output, default)
 
-    enumerator = MockArtifactEnumerator()
+    enumerator = MockArtifactEnumerator({bar_set: "false"})
     command.enumerate_artifacts(enumerator)
-    self.assertEquals([], enumerator.reads)
+    self.assertEquals([bar_set], enumerator.reads)
     self.assertEquals([default], enumerator.inputs)
     self.assertEquals([output], enumerator.outputs)
 
-    enumerator = MockArtifactEnumerator(env = {"BAR": "baz"})
+    enumerator = MockArtifactEnumerator({bar_set: "true"})
     command.enumerate_artifacts(enumerator)
-    self.assertEquals([], enumerator.reads)
-    self.assertEquals([], enumerator.inputs)
+    self.assertEquals([bar_set], enumerator.reads)
+    self.assertEquals([bar], enumerator.inputs)
     self.assertEquals([output], enumerator.outputs)
 
-    context = MockCommandContext(dir, {"BAR": "baz"})
+    dir = VirtualDirectory()
+    dir.write("env/set/BAR", "true")
+    dir.write("env/BAR", "baz")
+    context = MockCommandContext(dir)
     log = cStringIO.StringIO()
     self.assertTrue(command.run(context, log))
     self.assertEquals("baz", dir.read("foo"))
     self.assertEquals("", log.getvalue())
 
+    dir = VirtualDirectory()
+    dir.write("env/set/BAR", "false")
     dir.write("default", "qux")
-
-    context = MockCommandContext(dir, {})
+    context = MockCommandContext(dir)
     log = cStringIO.StringIO()
     self.assertTrue(command.run(context, log))
     self.assertEquals("qux", dir.read("foo"))
     self.assertEquals("", log.getvalue())
 
-    self.assertEquals("echo ${BAR:default} > foo\n", _print_command(command))
+    self.assertEquals("echo ${BAR:$(default)} > foo\n", _print_command(command))
 
   def testDoAllCommand(self):
     dir = VirtualDirectory()

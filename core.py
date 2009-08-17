@@ -209,6 +209,22 @@ class Context(object):
 
     raise NotImplementedError
 
+  def environment_artifact(self, env_name):
+    """Similar to source_artifact(), but returns an artifact corresponding to an
+    environment variable.  This looks like a file, but its contents correspond
+    to the value of the variable, and its modification time changes when SEBS
+    detects that the environment variable has changed.  Unset environment
+    variables appear as empty files."""
+
+    raise NotImplementedError
+
+  def environment_set_artifact(self, env_name):
+    """Similar to environment_artifact, but returns an artifact whose contents
+    will be true or false depending on whether the given environment variable
+    is present in the environment."""
+
+    raise NotImplementedError
+
   def intermediate_artifact(self, filename, action):
     """Returns an Artifact representing an intermediate artifact which will be
     generated at build time by the given action and placed in the tmp

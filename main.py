@@ -82,11 +82,12 @@ class _WorkingDirMapping(MappedDirectory.Mapping):
   "mem" subdirectory into a VirtualDirectory.  This class implements a
   mapping which can be used with MappedDirectory to accomplish these things."""
 
-  def __init__(self, source_dir, output_dir, mem_dir):
+  def __init__(self, source_dir, output_dir, mem_dir, env_dir):
     super(_WorkingDirMapping, self).__init__()
     self.__source_dir = source_dir
     self.__output_dir = output_dir
     self.__mem_dir = mem_dir
+    self.__env_dir = env_dir
 
   def map(self, filename):
     # Note:  We intentionally consider any directory name starting with "src"
@@ -95,8 +96,29 @@ class _WorkingDirMapping(MappedDirectory.Mapping):
       return (self.__source_dir, filename)
     elif filename.startswith("mem/"):
       return (self.__mem_dir, filename[4:])
+    elif filename.startswith("env/"):
+      env_name = filename[4:]
+      self.__update_env(env_name)
+      return (self.__env_dir, env_name)
     else:
       return (self.__output_dir, filename)
+
+  def __update_env(self, env_name):
+    """Every time an environment variable is accessed we check to see if it has
+    changed."""
+
+    if env_name.startswith("set/"):
+      if env_name[4:] in os.environ:
+        value = "true"
+      else:
+        value = "false"
+    else:
+      value = os.environ.get(env_name, "")
+
+    if not self.__env_dir.exists(env_name) or \
+       self.__env_dir.read(env_name) != value:
+      # Value has changed.  Update.
+      self.__env_dir.write(env_name, value)
 
 def _args_to_rules(loader, args):
   """Given a list of command-line arguments like 'foo/bar.sebs:baz', return an
@@ -222,6 +244,7 @@ def main(argv):
   source_dir = DiskDirectory(".")
   output_dir = source_dir
   mem_dir = VirtualDirectory()
+  env_dir = VirtualDirectory()
 
   for name, value in opts:
     if name in ("-h", "--help"):
@@ -231,12 +254,13 @@ def main(argv):
       output_dir = DiskDirectory(value)
 
   root_dir = MappedDirectory(
-      _WorkingDirMapping(source_dir, output_dir, mem_dir))
+      _WorkingDirMapping(source_dir, output_dir, mem_dir, env_dir))
 
   if len(args) == 0:
     raise UsageError("Missing command.")
 
   _restore_pickle(mem_dir, "mem.pickle")
+  _restore_pickle(env_dir, "env.pickle")
 
   save_mem = True
 
@@ -251,6 +275,7 @@ def main(argv):
   finally:
     if save_mem:
       _save_pickle(mem_dir, "mem.pickle")
+      _save_pickle(env_dir, "env.pickle")
 
 if __name__ == "__main__":
   try:
