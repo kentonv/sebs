@@ -380,6 +380,7 @@ class Builder(object):
                                          action_state.disk_inputs,
                                          action_state.outputs,
                                          test_result,
+                                         self.__root_dir,
                                          self.__lock):
           if not self.failed:
             self.__console.write(ColoredText(ColoredText.RED, "BUILD FAILED"))

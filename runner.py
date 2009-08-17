@@ -48,7 +48,7 @@ class ActionRunner(object):
   def __init__(self):
     pass
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, dir, lock):
     """Executes the given action.  Returns true if the command succeeds, false
     if it fails.  |inputs| and |outputs| are lists of artifacts that are the
     inputs and outputs of this action, as determined by calling
@@ -154,22 +154,13 @@ class _CommandContextImpl(CommandContext):
 class SubprocessRunner(ActionRunner):
   """An ActionRunner which actually executes the commands."""
 
-  def __init__(self, working_dir, console, verbose = False):
+  def __init__(self, console, verbose = False):
     super(SubprocessRunner, self).__init__()
 
-    self.__env = os.environ.copy()
-    self.__working_dir = working_dir
     self.__console = console
-    self.__temp_files_for_mem = {}
     self.__verbose = verbose
 
-    # TODO(kenton):  We should *add* src to the existing PYTHONPATH instead of
-    #   overwrite, but there is one problem:  The SEBS Python archive may be
-    #   in PYTHONPATH, and we do NOT want programs that we run to be able to
-    #   take advantage of that to import SEBS implementation modules.
-    self.__env["PYTHONPATH"] = "src"
-
-  def run(self, action, inputs, disk_inputs, outputs, test_result, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, dir, lock):
     typecheck(action, Action)
 
     pending_message = self.__console.add_pending([
@@ -178,10 +169,9 @@ class SubprocessRunner(ActionRunner):
     # Make sure the output directories exist.
     # TODO(kenton):  Also delete output files from previous runs?
     for output in outputs:
-      self.__working_dir.mkdir(os.path.dirname(output.filename))
+      dir.mkdir(os.path.dirname(output.filename))
 
-    context = _CommandContextImpl(
-        self.__working_dir, pending_message, self.__verbose, lock)
+    context = _CommandContextImpl(dir, pending_message, self.__verbose, lock)
     try:
       log = cStringIO.StringIO()
       result = action.command.run(context, log)
@@ -196,7 +186,7 @@ class SubprocessRunner(ActionRunner):
       if not result:
         # Set modification time of all outputs to zero to make sure they are
         # rebuilt on the next run.
-        self.__reset_mtime(outputs)
+        self.__reset_mtime(dir, outputs)
 
         pending_message.finish(
             [ColoredText(ColoredText.RED, "ERROR: ")] + final_text)
@@ -205,14 +195,14 @@ class SubprocessRunner(ActionRunner):
     except KeyboardInterrupt:
       # Like above.
       context.resolve_mem_files()
-      self.__reset_mtime(outputs)
+      self.__reset_mtime(dir, outputs)
       pending_message.finish(
             [ColoredText(ColoredText.RED, "CANCEL: "), pending_message.text])
       raise
     except:
       # Like above.
       context.resolve_mem_files()
-      self.__reset_mtime(outputs)
+      self.__reset_mtime(dir, outputs)
       pending_message.finish(
             [ColoredText(ColoredText.RED, "ERROR: "), pending_message.text])
       raise
@@ -227,20 +217,19 @@ class SubprocessRunner(ActionRunner):
 
     return True
 
-  def __reset_mtime(self, artifacts):
+  def __reset_mtime(self, dir, artifacts):
     for artifact in artifacts:
       try:
-        self.__working_dir.touch(artifact.filename, 0)
+        dir.touch(artifact.filename, 0)
       except Exception:
         pass
 
 # ====================================================================
 
 class CachingRunner(ActionRunner):
-  def __init__(self, sub_runner, working_dir, console):
+  def __init__(self, sub_runner, console):
     typecheck(sub_runner, ActionRunner)
     self.__sub_runner = sub_runner
-    self.__working_dir = working_dir
     self.__console = console
     self.__cache = {}
 
@@ -249,9 +238,9 @@ class CachingRunner(ActionRunner):
   def restore(self, cache):
     self.__cache = cache
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, dir, lock):
     (can_skip, hash) = self.__can_skip(
-        action, inputs, disk_inputs, outputs, test_result)
+        action, inputs, disk_inputs, outputs, test_result, dir)
     if can_skip:
       self.__console.write([
           ColoredText(ColoredText.CYAN, "no changes: "),
@@ -261,7 +250,7 @@ class CachingRunner(ActionRunner):
       # Update timestamps so that the builder does not even mark these files
       # dirty if we immediately build again.
       for output in outputs:
-        self.__working_dir.touch(output.filename)
+        dir.touch(output.filename)
       return True
 
     # Clear all outputs from cache since the cached value is now invalid.
@@ -271,18 +260,18 @@ class CachingRunner(ActionRunner):
       self.__cache[output.filename] = None
 
     result = self.__sub_runner.run(
-        action, inputs, disk_inputs, outputs, test_result, lock)
+        action, inputs, disk_inputs, outputs, test_result, dir, lock)
 
     if result:
       # Action succeeded, so record it in the cache.  First we need to refresh
       # the disk input list.
-      enumerator = _DiskInputCollector(self.__working_dir)
+      enumerator = _DiskInputCollector(dir)
       action.command.enumerate_artifacts(enumerator)
 
       # Must recompute hash if it was not computed before or if the disk inputs
       # changed.
       if hash is None or set(disk_inputs) != set(enumerator.disk_inputs):
-        hash = self.__hash(action, inputs, enumerator.disk_inputs, outputs)
+        hash = self.__hash(action, inputs, enumerator.disk_inputs, outputs, dir)
 
       # Set new hash on all outputs.
       for output in outputs:
@@ -290,7 +279,7 @@ class CachingRunner(ActionRunner):
 
     return result
 
-  def __can_skip(self, action, inputs, disk_inputs, outputs, test_result):
+  def __can_skip(self, action, inputs, disk_inputs, outputs, test_result, dir):
     # There should be no such thing as an action without outputs, but if we
     # see one we'll do the conservative thing and not skip it.
     if len(outputs) == 0:
@@ -312,19 +301,19 @@ class CachingRunner(ActionRunner):
         return (False, None)
 
     # Compute new hash and compare.
-    new_hash = self.__hash(action, inputs, disk_inputs, outputs)
+    new_hash = self.__hash(action, inputs, disk_inputs, outputs, dir)
     if new_hash != last_hash:
       return (False, new_hash)
 
     # Make sure all outputs exist.  We do this last to avoid touching the
     # filesystem when we don't have to.
     for output in outputs:
-      if not self.__working_dir.exists(output.filename):
+      if not dir.exists(output.filename):
         return (False, new_hash)
 
     return (True, new_hash)
 
-  def __hash(self, action, inputs, disk_inputs, outputs):
+  def __hash(self, action, inputs, disk_inputs, outputs, dir):
     # Security is not a concern here, so MD5 is OK and probably faster than
     # more-secure algorithms.
     hasher = md5.md5()
@@ -336,7 +325,7 @@ class CachingRunner(ActionRunner):
       hasher.update(str(len(input)))
       hasher.update(" ")
       hasher.update(input)
-      content = self.__working_dir.read(input)
+      content = dir.read(input)
       hasher.update(str(len(content)))
       hasher.update(" ")
       hasher.update(content)

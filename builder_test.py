@@ -43,17 +43,16 @@ from sebs.console import make_console
 from sebs.runner import ActionRunner
 
 class MockRunner(ActionRunner):
-  def __init__(self, dir):
+  def __init__(self):
     self.actions = []
-    self.__dir = dir
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, dir, lock):
     self.actions.append(action)
 
     # Hack for testDerivedCondition:  If the action is condition_builder then
     # copy cond_dep to cond.
     if action.name == "condition_builder":
-      self.__dir.write("cond", self.__dir.read("cond_dep"))
+      dir.write("cond", dir.read("cond_dep"))
 
     return True
 
@@ -100,7 +99,7 @@ class BuilderTest(unittest.TestCase):
 
   def doBuild(self, *artifacts):
     builder = Builder(self.dir, self.console)
-    runner = MockRunner(self.dir)
+    runner = MockRunner()
     for artifact in artifacts:
       builder.add_artifact(artifact)
     builder.build(runner)

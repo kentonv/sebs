@@ -244,8 +244,8 @@ def build(root_dir, argv):
       threads = int(value)
 
   if runner is None:
-    runner = SubprocessRunner(root_dir, console, verbose)
-    caching_runner = CachingRunner(runner, root_dir, console)
+    runner = SubprocessRunner(console, verbose)
+    caching_runner = CachingRunner(runner, console)
     runner = caching_runner
 
     _restore_pickle(caching_runner, root_dir, "cache.pickle")
