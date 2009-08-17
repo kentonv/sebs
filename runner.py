@@ -48,7 +48,7 @@ class ActionRunner(object):
   def __init__(self):
     pass
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, dir, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
     """Executes the given action.  Returns true if the command succeeds, false
     if it fails.  |inputs| and |outputs| are lists of artifacts that are the
     inputs and outputs of this action, as determined by calling
@@ -151,6 +151,12 @@ class _CommandContextImpl(CommandContext):
       os.remove(diskfile)
     self.__temp_files_for_mem = {}
 
+def _config_prefix(config):
+  if config.name is None:
+    return ""
+  else:
+    return ColoredText(ColoredText.FUCHSIA, [config.name, ": "])
+
 class SubprocessRunner(ActionRunner):
   """An ActionRunner which actually executes the commands."""
 
@@ -160,18 +166,20 @@ class SubprocessRunner(ActionRunner):
     self.__console = console
     self.__verbose = verbose
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, dir, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
     typecheck(action, Action)
 
     pending_message = self.__console.add_pending([
+        _config_prefix(config),
         ColoredText(ColoredText.BLUE, [action.verb, ": "]), action.name])
 
     # Make sure the output directories exist.
     # TODO(kenton):  Also delete output files from previous runs?
     for output in outputs:
-      dir.mkdir(os.path.dirname(output.filename))
+      config.root_dir.mkdir(os.path.dirname(output.filename))
 
-    context = _CommandContextImpl(dir, pending_message, self.__verbose, lock)
+    context = _CommandContextImpl(
+        config.root_dir, pending_message, self.__verbose, lock)
     try:
       log = cStringIO.StringIO()
       result = action.command.run(context, log)
@@ -186,7 +194,7 @@ class SubprocessRunner(ActionRunner):
       if not result:
         # Set modification time of all outputs to zero to make sure they are
         # rebuilt on the next run.
-        self.__reset_mtime(dir, outputs)
+        self.__reset_mtime(config.root_dir, outputs)
 
         pending_message.finish(
             [ColoredText(ColoredText.RED, "ERROR: ")] + final_text)
@@ -195,14 +203,14 @@ class SubprocessRunner(ActionRunner):
     except KeyboardInterrupt:
       # Like above.
       context.resolve_mem_files()
-      self.__reset_mtime(dir, outputs)
+      self.__reset_mtime(config.root_dir, outputs)
       pending_message.finish(
             [ColoredText(ColoredText.RED, "CANCEL: "), pending_message.text])
       raise
     except:
       # Like above.
       context.resolve_mem_files()
-      self.__reset_mtime(dir, outputs)
+      self.__reset_mtime(config.root_dir, outputs)
       pending_message.finish(
             [ColoredText(ColoredText.RED, "ERROR: "), pending_message.text])
       raise
@@ -238,11 +246,12 @@ class CachingRunner(ActionRunner):
   def restore(self, cache):
     self.__cache = cache
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, dir, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
     (can_skip, hash) = self.__can_skip(
-        action, inputs, disk_inputs, outputs, test_result, dir)
+        action, inputs, disk_inputs, outputs, test_result, config.root_dir)
     if can_skip:
       self.__console.write([
+          _config_prefix(config),
           ColoredText(ColoredText.CYAN, "no changes: "),
           ColoredText(ColoredText.BLUE, [action.verb, ": "]),
           action.name])
@@ -250,7 +259,7 @@ class CachingRunner(ActionRunner):
       # Update timestamps so that the builder does not even mark these files
       # dirty if we immediately build again.
       for output in outputs:
-        dir.touch(output.filename)
+        config.root_dir.touch(output.filename)
       return True
 
     # Clear all outputs from cache since the cached value is now invalid.
@@ -260,18 +269,19 @@ class CachingRunner(ActionRunner):
       self.__cache[output.filename] = None
 
     result = self.__sub_runner.run(
-        action, inputs, disk_inputs, outputs, test_result, dir, lock)
+        action, inputs, disk_inputs, outputs, test_result, config, lock)
 
     if result:
       # Action succeeded, so record it in the cache.  First we need to refresh
       # the disk input list.
-      enumerator = _DiskInputCollector(dir)
+      enumerator = _DiskInputCollector(config.root_dir)
       action.command.enumerate_artifacts(enumerator)
 
       # Must recompute hash if it was not computed before or if the disk inputs
       # changed.
       if hash is None or set(disk_inputs) != set(enumerator.disk_inputs):
-        hash = self.__hash(action, inputs, enumerator.disk_inputs, outputs, dir)
+        hash = self.__hash(
+            action, inputs, enumerator.disk_inputs, outputs, config.root_dir)
 
       # Set new hash on all outputs.
       for output in outputs:

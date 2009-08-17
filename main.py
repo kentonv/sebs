@@ -82,12 +82,13 @@ class _WorkingDirMapping(MappedDirectory.Mapping):
   "mem" subdirectory into a VirtualDirectory.  This class implements a
   mapping which can be used with MappedDirectory to accomplish these things."""
 
-  def __init__(self, source_dir, output_dir, mem_dir, env_dir):
+  def __init__(self, source_dir, output_dir, mem_dir, env_dir, alt_configs):
     super(_WorkingDirMapping, self).__init__()
     self.__source_dir = source_dir
     self.__output_dir = output_dir
     self.__mem_dir = mem_dir
     self.__env_dir = env_dir
+    self.__alt_configs = alt_configs
 
     if env_dir.exists("$config"):
       self.__configured_env = set(env_dir.read("$config").split(","))
@@ -105,6 +106,13 @@ class _WorkingDirMapping(MappedDirectory.Mapping):
       env_name = filename[4:]
       self.__update_env(env_name)
       return (self.__env_dir, env_name)
+    elif filename.startswith("alt/"):
+      parts = filename[4:].split("/", 1)
+      config = self.__alt_configs.get(parts[0])
+      if len(parts) > 1 and config is not None:
+        return (config.root_dir, parts[1])
+      else:
+        return (self.__output_dir, filename)
     else:
       return (self.__output_dir, filename)
 
@@ -171,27 +179,125 @@ def _save_pickle(obj, dir, filename):
   cPickle.dump(obj.save(), db, cPickle.HIGHEST_PROTOCOL)
   db.close()
 
+class _Configuration(object):
+  def __init__(self, output_path, all_configs = None):
+    # We want to make sure to construct only one copy of each config, even
+    # if configs refer to each other or multiple configs refer to a shared
+    # config.  So, all_configs maps names to configs that we have already
+    # constructed.
+    if all_configs is None:
+      # Note that if we just make all_configs default to {} in the method
+      # signature, then Python will create a single empty map to use as the
+      # default value for all calls rather than create a new one every call.
+      # Since we modify all_configs during this method, we would be modifying
+      # the shared default value, which would be bad.  If you don't understand
+      # what I mean, try typing the following into the interpreter and then
+      # calling it several times with no argument:
+      #   def f(l = []):
+      #     l.append("foo")
+      #     return l
+      # Ouchies.
+      all_configs = {}
+    if output_path is None:
+      all_configs[""] = self
+    else:
+      all_configs[output_path] = self
+
+    self.name = output_path
+    self.source_dir = DiskDirectory(".")
+    if output_path is None:
+      self.output_dir = self.source_dir
+    else:
+      self.source_dir.mkdir(output_path)
+      self.output_dir = DiskDirectory(output_path)
+    self.mem_dir = VirtualDirectory()
+    self.env_dir = VirtualDirectory()
+    _restore_pickle(self.mem_dir, self.output_dir, "mem.pickle")
+    _restore_pickle(self.env_dir, self.output_dir, "env.pickle")
+    self.alt_configs = {}
+    self.mapping = _WorkingDirMapping(self.source_dir, self.output_dir,
+                                      self.mem_dir, self.env_dir,
+                                      self.alt_configs)
+    self.root_dir = MappedDirectory(self.mapping)
+
+    self.alt_configs["host"] = self
+
+    if self.env_dir.exists("$mappings"):
+      mappings = self.env_dir.read("$mappings").split(":")
+      for mapping in mappings:
+        if mapping == "":
+          continue
+        alias, name = mapping.split("=", 1)
+        if name in all_configs:
+          self.alt_configs[alias] = all_configs[name]
+        else:
+          if name == "":
+            name = None
+          self.alt_configs[alias] = _Configuration(name, all_configs)
+
+  def save(self):
+    _save_pickle(self.mem_dir, self.root_dir, "mem.pickle")
+    _save_pickle(self.env_dir, self.root_dir, "env.pickle")
+
+  def getenv(self, name):
+    if self.root_dir.read("env/set/" + name) == "true":
+      return self.root_dir.read("env/" + name)
+    else:
+      return None
+
+  def get_all_linked_configs(self):
+    result = set()
+    self.__get_all_linked_configs_recursive(result)
+    return result
+
+  def __get_all_linked_configs_recursive(self, result):
+    if self in result:
+      return
+
+    result.add(self)
+    for link in self.alt_configs.values():
+      link.__get_all_linked_configs_recursive(result)
+
 # ====================================================================
 
-def configure(env_dir, argv):
+def configure(config, argv):
   try:
-    opts, args = getopt.getopt(argv[1:], "", [])
+    opts, args = getopt.getopt(argv[1:], "C:o", [])
   except getopt.error, message:
     raise UsageError(message)
 
-  if len(args) == 0:
-    if env_dir.exists("$config"):
-      locked_vars = env_dir.read("$config").split(",")
+  output = False
+  mappings = {}
+  for name, value in opts:
+    if name == "-C":
+      parts = value.split("=", 1)
+      if len(parts) == 1:
+        mappings[parts[0]] = parts[0]
+      else:
+        mappings[parts[0]] = parts[1]
+    elif name == "-o":
+      output = True
+
+  if output:
+    if config.env_dir.exists("$mappings"):
+      mappings = config.env_dir.read("$mappings").split(":")
+      for mapping in mappings:
+        if mapping == "":
+          continue
+        print "-C" + mapping
+
+    if config.env_dir.exists("$config"):
+      locked_vars = config.env_dir.read("$config").split(",")
     else:
       locked_vars = []
 
     for var in locked_vars:
       if var == "":
         pass
-      elif env_dir.read("set/" + var) == "true":
-        print "%s=%s" % (var, env_dir.read(var))
+      elif config.env_dir.read("set/" + var) == "true":
+        print "%s=%s" % (var, config.env_dir.read(var))
       else:
-        print "unset", var
+        print var + "-"
 
   else:
     locked_vars = []
@@ -216,16 +322,19 @@ def configure(env_dir, argv):
       else:
         value = ""
         is_set = "false"
-      env_dir.write(name, value)
-      env_dir.write("set/" + name, is_set)
+      config.env_dir.write(name, value)
+      config.env_dir.write("set/" + name, is_set)
 
       locked_vars.append(name)
 
-    env_dir.write("$config", ",".join(locked_vars))
+    config.env_dir.write("$config", ",".join(locked_vars))
+
+    config.env_dir.write("$mappings",
+        ":".join(["=".join(mapping) for mapping in mappings.items()]))
 
 # --------------------------------------------------------------------
 
-def build(root_dir, argv):
+def build(config, argv):
   try:
     opts, args = getopt.getopt(argv[1:], "vj:", [])
   except getopt.error, message:
@@ -248,18 +357,18 @@ def build(root_dir, argv):
     caching_runner = CachingRunner(runner, console)
     runner = caching_runner
 
-    _restore_pickle(caching_runner, root_dir, "cache.pickle")
+    _restore_pickle(caching_runner, config.root_dir, "cache.pickle")
 
-  loader = Loader(root_dir)
-  builder = Builder(root_dir, console)
+  loader = Loader(config.root_dir)
+  builder = Builder(console)
 
   if argv[0] == "test":
     for rule in list(_args_to_rules(loader, args)):
       if isinstance(rule, Test):
-        builder.add_test(rule)
+        builder.add_test(config, rule)
   else:
     for rule in list(_args_to_rules(loader, args)):
-      builder.add_rule(rule)
+      builder.add_rule(config, rule)
 
   thread_objects = []
   success = True
@@ -277,7 +386,7 @@ def build(root_dir, argv):
     for thread in thread_objects:
       thread.join()
   finally:
-    _save_pickle(caching_runner, root_dir, "cache.pickle")
+    _save_pickle(caching_runner, config.root_dir, "cache.pickle")
 
   if builder.failed:
     return 1
@@ -290,74 +399,99 @@ def build(root_dir, argv):
 
 # --------------------------------------------------------------------
 
-def clean(root_dir, argv):
-  if len(argv) > 1:
-    raise UsageError("clean currently accepts no arguments.")
-
-  print "Deleting all output directories..."
-  for dir in ["tmp", "bin", "lib", "share", "mem", "env"]:
-    if root_dir.exists(dir):
-      shutil.rmtree(root_dir.get_disk_path(dir))
-
-  for file in [ "mem.pickle", "env.pickle", "cache.pickle" ]:
-    if root_dir.exists(file):
-      os.remove(root_dir.get_disk_path(file))
-
-  # Try to remove the output directory itself -- will fail if not empty.
-  outdir = root_dir.get_disk_path(".")
-  if outdir.endswith("/."):
-    # rmdir doesn't like a trailing "/.".
-    outdir = outdir[:-2]
+def clean(config, argv):
   try:
-    os.rmdir(outdir)
-  except os.error:
-    pass
+    opts, args = getopt.getopt(argv[1:], "", ["expunge"])
+  except getopt.error, message:
+    raise UsageError(message)
+
+  expunge = False
+
+  for name, value in opts:
+    if name == "--expunge":
+      expunge = True
+
+  for linked_config in config.get_all_linked_configs():
+    if linked_config.name is None:
+      print "Cleaning default config."
+    else:
+      print "Cleaning:", linked_config.name
+
+    for dir in ["tmp", "bin", "lib", "share", "mem", "env"]:
+      if linked_config.root_dir.exists(dir):
+        shutil.rmtree(linked_config.root_dir.get_disk_path(dir))
+
+    for file in [ "mem.pickle", "env.pickle", "cache.pickle" ]:
+      if linked_config.root_dir.exists(file):
+        os.remove(linked_config.root_dir.get_disk_path(file))
+
+    if expunge:
+      # Try to remove the output directory itself -- will fail if not empty.
+      outdir = linked_config.root_dir.get_disk_path(".")
+      if outdir.endswith("/."):
+        # rmdir doesn't like a trailing "/.".
+        outdir = outdir[:-2]
+      try:
+        os.rmdir(outdir)
+      except os.error:
+        pass
+
+    else:
+      # Restore the parts of env.pickle that were set explicitly.
+      new_env_dir = VirtualDirectory()
+
+      if linked_config.env_dir.exists("$mappings"):
+        new_env_dir.write("$mappings", linked_config.env_dir.read("$mappings"))
+      if linked_config.env_dir.exists("$config"):
+        locked_vars = linked_config.env_dir.read("$config")
+        new_env_dir.write("$config", locked_vars)
+
+        for var in locked_vars.split(","):
+          if var != "":
+            new_env_dir.write(var, linked_config.env_dir.read(var))
+            new_env_dir.write("set/" + var,
+              linked_config.env_dir.read("set/" + var))
+
+        _save_pickle(new_env_dir, linked_config.root_dir, "env.pickle")
 
 # ====================================================================
 
 def main(argv):
   try:
-    opts, args = getopt.getopt(argv[1:], "ho:", ["help", "output="])
+    opts, args = getopt.getopt(argv[1:], "hc:", ["help", "config="])
   except getopt.error, message:
     raise UsageError(message)
 
-  source_dir = DiskDirectory(".")
-  output_dir = source_dir
-  mem_dir = VirtualDirectory()
-  env_dir = VirtualDirectory()
+  output_path = None
 
   for name, value in opts:
     if name in ("-h", "--help"):
       print __doc__
       return 0
-    elif name in ("-o", "--output"):
-      source_dir.mkdir(value)
-      output_dir = DiskDirectory(value)
+    elif name in ("-c", "--config"):
+      output_path = value
 
-  _restore_pickle(mem_dir, output_dir, "mem.pickle")
-  _restore_pickle(env_dir, output_dir, "env.pickle")
-  root_dir = MappedDirectory(
-      _WorkingDirMapping(source_dir, output_dir, mem_dir, env_dir))
+  config = _Configuration(output_path)
 
   if len(args) == 0:
     raise UsageError("Missing command.")
 
-  save_mem = True
+  should_save = True
 
   try:
     if args[0] in ("build", "test"):
-      return build(root_dir, args)
+      return build(config, args)
     elif args[0] == "configure":
-      return configure(env_dir, args)
+      return configure(config, args)
     elif args[0] == "clean":
-      save_mem = False
-      return clean(root_dir, args)
+      should_save = False
+      return clean(config, args)
     else:
       raise UsageError("Unknown command: %s" % args[0])
   finally:
-    if save_mem:
-      _save_pickle(mem_dir, root_dir, "mem.pickle")
-      _save_pickle(env_dir, root_dir, "env.pickle")
+    if should_save:
+      for linked_config in config.get_all_linked_configs():
+        linked_config.save()
 
 if __name__ == "__main__":
   try:

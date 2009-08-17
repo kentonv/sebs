@@ -46,13 +46,13 @@ class MockRunner(ActionRunner):
   def __init__(self):
     self.actions = []
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, dir, lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
     self.actions.append(action)
 
     # Hack for testDerivedCondition:  If the action is condition_builder then
     # copy cond_dep to cond.
     if action.name == "condition_builder":
-      dir.write("cond", dir.read("cond_dep"))
+      config.root_dir.write("cond", config.root_dir.read("cond_dep"))
 
     return True
 
@@ -90,6 +90,10 @@ class ConditionalMockCommand(Command):
     for output in self.__outputs:
       artifact_enumerator.add_output(output)
 
+class MockConfiguration(object):
+  def __init__(self, dir):
+    self.root_dir = dir
+
 class BuilderTest(unittest.TestCase):
   def setUp(self):
     self.dir = VirtualDirectory()
@@ -98,10 +102,11 @@ class BuilderTest(unittest.TestCase):
     self.console = make_console(cStringIO.StringIO())  # ignore output
 
   def doBuild(self, *artifacts):
-    builder = Builder(self.dir, self.console)
+    builder = Builder(self.console)
     runner = MockRunner()
+    config = MockConfiguration(self.dir)
     for artifact in artifacts:
-      builder.add_artifact(artifact)
+      builder.add_artifact(config, artifact)
     builder.build(runner)
     return runner.actions
 

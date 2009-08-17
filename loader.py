@@ -109,6 +109,12 @@ class _ContextImpl(Context):
     return self.__loader.derived_artifact(
       os.path.join(directory, filename), action)
 
+  def configured_artifact(self, artifact, configuration):
+    typecheck(artifact, Artifact)
+    typecheck(configuration, basestring)
+    return Artifact(os.path.join("alt", configuration, artifact.filename),
+                    alt_artifact = artifact, alt_config = configuration);
+
   def action(self, *vargs, **kwargs):
     return Action(*vargs, **kwargs)
 

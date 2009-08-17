@@ -57,7 +57,7 @@ function expect_failure() {
 OUTPUT=tmp/sebs/cpp_test/output
 WORKING=tmp/sebs/cpp_test/build
 mkdir -p $WORKING
-SEBS='python -m sebs.main --output=$WORKING'
+SEBS='python -m sebs.main --config=$WORKING'
 
 echo "Cleaning..."
 
@@ -72,12 +72,12 @@ echo "Building test binary..."
 
 expect_success "$SEBS build sebs/cpp_test/cpp_test.sebs:prog &> $OUTPUT"
 
-expect_contains $OUTPUT '> compile: src/sebs/cpp_test/main.cc$'
-expect_contains $OUTPUT '> compile: src/sebs/cpp_test/bar.cc$'
-expect_contains $OUTPUT '> link: sebs/cpp_test/cpp_test.sebs:bar$'
-expect_contains $OUTPUT '> compile: src/sebs/cpp_test/foo.cc$'
-expect_contains $OUTPUT '> link: sebs/cpp_test/cpp_test.sebs:foo$'
-expect_contains $OUTPUT '> link: sebs/cpp_test/cpp_test.sebs:prog$'
+expect_contains $OUTPUT 'compile: src/sebs/cpp_test/main.cc$'
+expect_contains $OUTPUT 'compile: src/sebs/cpp_test/bar.cc$'
+expect_contains $OUTPUT 'link: sebs/cpp_test/cpp_test.sebs:bar$'
+expect_contains $OUTPUT 'compile: src/sebs/cpp_test/foo.cc$'
+expect_contains $OUTPUT 'link: sebs/cpp_test/cpp_test.sebs:foo$'
+expect_contains $OUTPUT 'link: sebs/cpp_test/cpp_test.sebs:prog$'
 
 echo "Touching header and recompiling..."
 
@@ -103,7 +103,7 @@ echo "Running passing test..."
 
 expect_success "$SEBS test sebs/cpp_test/cpp_test.sebs:passing_test &> $OUTPUT"
 
-expect_contains $OUTPUT '> PASS: test: sebs/cpp_test/cpp_test.sebs:passing_test$'
+expect_contains $OUTPUT '> PASS: .*: test: sebs/cpp_test/cpp_test.sebs:passing_test$'
 
 expect_contains $WORKING/tmp/sebs/cpp_test/passing_test_output.txt \
   '^BarFunction(test) FooFunction(test) $'
@@ -112,7 +112,7 @@ echo "Running failing test..."
 
 expect_failure "$SEBS test sebs/cpp_test/cpp_test.sebs:failing_test &> $OUTPUT"
 
-expect_contains $OUTPUT '> FAIL: test: sebs/cpp_test/cpp_test.sebs:failing_test$'
+expect_contains $OUTPUT '> FAIL: .*: test: sebs/cpp_test/cpp_test.sebs:failing_test$'
 
 expect_contains $WORKING/tmp/sebs/cpp_test/failing_test_output.txt \
   '^FooFunction(fail) $'

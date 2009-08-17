@@ -173,7 +173,7 @@ class _LineLimiter(object):
     self.line_count = 0
 
   def write(self, text):
-    if text[0] == '\033':
+    if text.startswith('\033'):
       # ANSI control code.
       self.out.write(text)
     else:

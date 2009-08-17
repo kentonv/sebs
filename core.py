@@ -74,14 +74,28 @@ class Artifact(object):
     filename      Name of the file relative to the top of the project.
     action        The Action which creates this file, or None if this is not
                   a generated file.  If the file is generated, then it may not
-                  actually exist yet; the Action is a placeholder."""
+                  actually exist yet; the Artifact is a placeholder.
+    alt_artifact  If not None, then this Artifact represents alt_artifact
+                  when built under a different configuration (named by
+                  alt_config).  Must be None if action is not None.
+    alt_config    The name of the configuration under which alt_artifact should
+                  be built, or None if alt_artifact is None.  The most common
+                  alternate configuration is "host", which means that the
+                  artifact should be compiled such that it may be executed on
+                  the host machine (the machine performing the build), even if
+                  we are currently cross-compiling."""
 
-  def __init__(self, filename, action):
+  def __init__(self, filename, action = None,
+               alt_artifact = None, alt_config = None):
     typecheck(filename, basestring)
     typecheck(action, Action)
+    typecheck(alt_artifact, Artifact)
+    typecheck(alt_config, basestring)
 
     self.filename = filename
     self.action = action
+    self.alt_artifact = alt_artifact
+    self.alt_config = alt_config
 
   def contents(self):
     """Returns a ContentToken for this Artifact, which can be used when building
@@ -277,6 +291,16 @@ class Context(object):
                    will be written, e.g. 'bin' or 'lib'.
       filename     The output file name relative to the output directory.
       action       The action which generates this output."""
+
+    raise NotImplementedError
+
+  def configured_artifact(self, artifact, configuration):
+    """Returns an Artifact representing the given Artifact built with a
+    different configuration.  |configuration| is the name of the configuration
+    to use.  Usually this is "host", meaning that the Artifact must be built
+    to run on the platform which is executing the build, as opposed to the
+    platform which the build is targetting (which may be different when
+    cross-compiling)."""
 
     raise NotImplementedError
 
