@@ -89,6 +89,11 @@ class _WorkingDirMapping(MappedDirectory.Mapping):
     self.__mem_dir = mem_dir
     self.__env_dir = env_dir
 
+    if env_dir.exists("$config"):
+      self.__configured_env = set(env_dir.read("$config").split(","))
+    else:
+      self.__configured_env = set()
+
   def map(self, filename):
     # Note:  We intentionally consider any directory name starting with "src"
     #   (including, e.g., "src-unofficial") as a source directory.
@@ -103,22 +108,30 @@ class _WorkingDirMapping(MappedDirectory.Mapping):
     else:
       return (self.__output_dir, filename)
 
-  def __update_env(self, env_name):
+  def __update_env(self, filename):
     """Every time an environment variable is accessed we check to see if it has
     changed."""
 
-    if env_name.startswith("set/"):
-      if env_name[4:] in os.environ:
-        value = "true"
-      else:
-        value = "false"
+    if filename.startswith("set/"):
+      env_name = filename[4:]
     else:
-      value = os.environ.get(env_name, "")
+      env_name = filename
 
-    if not self.__env_dir.exists(env_name) or \
-       self.__env_dir.read(env_name) != value:
-      # Value has changed.  Update.
-      self.__env_dir.write(env_name, value)
+    # We only update from the environment for variables that were not explicitly
+    # configured.
+    if env_name not in self.__configured_env:
+      if filename.startswith("set/"):
+        if env_name in os.environ:
+          value = "true"
+        else:
+          value = "false"
+      else:
+        value = os.environ.get(env_name, "")
+
+      if not self.__env_dir.exists(filename) or \
+         self.__env_dir.read(filename) != value:
+        # Value has changed.  Update.
+        self.__env_dir.write(filename, value)
 
 def _args_to_rules(loader, args):
   """Given a list of command-line arguments like 'foo/bar.sebs:baz', return an
@@ -159,6 +172,58 @@ def _save_pickle(obj, dir, filename):
   db.close()
 
 # ====================================================================
+
+def configure(env_dir, argv):
+  try:
+    opts, args = getopt.getopt(argv[1:], "", [])
+  except getopt.error, message:
+    raise UsageError(message)
+
+  if len(args) == 0:
+    if env_dir.exists("$config"):
+      locked_vars = env_dir.read("$config").split(",")
+    else:
+      locked_vars = []
+
+    for var in locked_vars:
+      if var == "":
+        pass
+      elif env_dir.read("set/" + var) == "true":
+        print "%s=%s" % (var, env_dir.read(var))
+      else:
+        print "unset", var
+
+  else:
+    locked_vars = []
+
+    for arg in args:
+      parts = arg.split("=", 1)
+      name = parts[0]
+
+      unset = len(parts) == 1 and name.endswith("-")
+      if unset:
+        name = name[:-1]
+
+      if not name.replace("_", "").isalnum():
+        raise UsageError("%s: Invalid environment variable name." % name)
+
+      if len(parts) == 2:
+        value = parts[1]
+        is_set = "true"
+      elif name in os.environ and not unset:
+        value = os.environ[name]
+        is_set = "true"
+      else:
+        value = ""
+        is_set = "false"
+      env_dir.write(name, value)
+      env_dir.write("set/" + name, is_set)
+
+      locked_vars.append(name)
+
+    env_dir.write("$config", ",".join(locked_vars))
+
+# --------------------------------------------------------------------
 
 def build(root_dir, argv):
   try:
@@ -223,6 +288,8 @@ def build(root_dir, argv):
 
   return 0
 
+# --------------------------------------------------------------------
+
 def clean(root_dir, argv):
   if len(argv) > 1:
     raise UsageError("clean currently accepts no arguments.")
@@ -246,9 +313,11 @@ def clean(root_dir, argv):
   except os.error:
     pass
 
+# ====================================================================
+
 def main(argv):
   try:
-    opts, args = getopt.getopt(argv[1:], "hc:", ["help", "output="])
+    opts, args = getopt.getopt(argv[1:], "ho:", ["help", "output="])
   except getopt.error, message:
     raise UsageError(message)
 
@@ -265,20 +334,21 @@ def main(argv):
       source_dir.mkdir(value)
       output_dir = DiskDirectory(value)
 
+  _restore_pickle(mem_dir, output_dir, "mem.pickle")
+  _restore_pickle(env_dir, output_dir, "env.pickle")
   root_dir = MappedDirectory(
       _WorkingDirMapping(source_dir, output_dir, mem_dir, env_dir))
 
   if len(args) == 0:
     raise UsageError("Missing command.")
 
-  _restore_pickle(mem_dir, root_dir, "mem.pickle")
-  _restore_pickle(env_dir, root_dir, "env.pickle")
-
   save_mem = True
 
   try:
     if args[0] in ("build", "test"):
       return build(root_dir, args)
+    elif args[0] == "configure":
+      return configure(env_dir, args)
     elif args[0] == "clean":
       save_mem = False
       return clean(root_dir, args)
