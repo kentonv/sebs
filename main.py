@@ -146,14 +146,15 @@ def _args_to_rules(loader, args):
     else:
       yield target
 
-def _restore_pickle(obj, filename):
-  if os.path.exists(filename):
-    db = open(filename, "rb")
+def _restore_pickle(obj, dir, filename):
+  disk_file = dir.get_disk_path(filename)
+  if os.path.exists(disk_file):
+    db = open(disk_file, "rb")
     obj.restore(cPickle.load(db))
     db.close()
 
-def _save_pickle(obj, filename):
-  db = open(filename, "wb")
+def _save_pickle(obj, dir, filename):
+  db = open(dir.get_disk_path(filename), "wb")
   cPickle.dump(obj.save(), db, cPickle.HIGHEST_PROTOCOL)
   db.close()
 
@@ -182,7 +183,7 @@ def build(root_dir, argv):
     caching_runner = CachingRunner(runner, root_dir, console)
     runner = caching_runner
 
-    _restore_pickle(caching_runner, "cache.pickle")
+    _restore_pickle(caching_runner, root_dir, "cache.pickle")
 
   loader = Loader(root_dir)
   builder = Builder(root_dir, console)
@@ -211,7 +212,7 @@ def build(root_dir, argv):
     for thread in thread_objects:
       thread.join()
   finally:
-    _save_pickle(caching_runner, "cache.pickle")
+    _save_pickle(caching_runner, root_dir, "cache.pickle")
 
   if builder.failed:
     return 1
@@ -227,17 +228,27 @@ def clean(root_dir, argv):
     raise UsageError("clean currently accepts no arguments.")
 
   print "Deleting all output directories..."
-  for dir in ["tmp", "bin", "lib", "share"]:
+  for dir in ["tmp", "bin", "lib", "share", "mem", "env"]:
     if root_dir.exists(dir):
       shutil.rmtree(root_dir.get_disk_path(dir))
 
-  for file in [ "mem.pickle", "cache.pickle" ]:
-    if os.path.exists(file):
-      os.remove(file)
+  for file in [ "mem.pickle", "env.pickle", "cache.pickle" ]:
+    if root_dir.exists(file):
+      os.remove(root_dir.get_disk_path(file))
+
+  # Try to remove the output directory itself -- will fail if not empty.
+  outdir = root_dir.get_disk_path(".")
+  if outdir.endswith("/."):
+    # rmdir doesn't like a trailing "/.".
+    outdir = outdir[:-2]
+  try:
+    os.rmdir(outdir)
+  except os.error:
+    pass
 
 def main(argv):
   try:
-    opts, args = getopt.getopt(argv[1:], "h", ["help", "output="])
+    opts, args = getopt.getopt(argv[1:], "hc:", ["help", "output="])
   except getopt.error, message:
     raise UsageError(message)
 
@@ -250,7 +261,8 @@ def main(argv):
     if name in ("-h", "--help"):
       print __doc__
       return 0
-    elif name == "--output":
+    elif name in ("-o", "--output"):
+      source_dir.mkdir(value)
       output_dir = DiskDirectory(value)
 
   root_dir = MappedDirectory(
@@ -259,8 +271,8 @@ def main(argv):
   if len(args) == 0:
     raise UsageError("Missing command.")
 
-  _restore_pickle(mem_dir, "mem.pickle")
-  _restore_pickle(env_dir, "env.pickle")
+  _restore_pickle(mem_dir, root_dir, "mem.pickle")
+  _restore_pickle(env_dir, root_dir, "env.pickle")
 
   save_mem = True
 
@@ -274,8 +286,8 @@ def main(argv):
       raise UsageError("Unknown command: %s" % args[0])
   finally:
     if save_mem:
-      _save_pickle(mem_dir, "mem.pickle")
-      _save_pickle(env_dir, "env.pickle")
+      _save_pickle(mem_dir, root_dir, "mem.pickle")
+      _save_pickle(env_dir, root_dir, "env.pickle")
 
 if __name__ == "__main__":
   try:

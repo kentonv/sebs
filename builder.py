@@ -448,7 +448,9 @@ class Builder(object):
 
       message = ["  %-70s " % name, indicator]
       if result == "false":
-        message.extend(["\n    ", test.test_output_artifact.filename])
+        output_file = self.__root_dir.get_disk_path(
+            test.test_output_artifact.filename)
+        message.extend(["\n    ", output_file])
       self.__console.write(message)
 
     return not had_failure
