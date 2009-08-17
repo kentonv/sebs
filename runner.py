@@ -235,6 +235,14 @@ class SubprocessRunner(ActionRunner):
 # ====================================================================
 
 class CachingRunner(ActionRunner):
+  """A wrapper ActionRunner which checks the contents of input files to
+  determine if they have actually changed, and skips the action if not."""
+
+  # TODO(kenton):  I wonder if we could use this to detect when the same
+  #   action in different configurations produces identical results, and thus
+  #   we can "steal" the result from the other config?  Might not be very
+  #   useful in practice, though.
+
   def __init__(self, sub_runner, console):
     typecheck(sub_runner, ActionRunner)
     self.__sub_runner = sub_runner
@@ -248,7 +256,7 @@ class CachingRunner(ActionRunner):
 
   def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
     (can_skip, hash) = self.__can_skip(
-        action, inputs, disk_inputs, outputs, test_result, config.root_dir)
+        action, inputs, disk_inputs, outputs, config)
     if can_skip:
       self.__console.write([
           _config_prefix(config),
@@ -266,7 +274,7 @@ class CachingRunner(ActionRunner):
     for output in outputs:
       # Set to None instead of actually removing from the map because we'll
       # probably be putting these outputs back into the map momentarily.
-      self.__cache[output.filename] = None
+      self.__cache[(config.name, output.filename)] = None
 
     result = self.__sub_runner.run(
         action, inputs, disk_inputs, outputs, test_result, config, lock)
@@ -285,24 +293,24 @@ class CachingRunner(ActionRunner):
 
       # Set new hash on all outputs.
       for output in outputs:
-        self.__cache[output.filename] = hash
+        self.__cache[(config.name, output.filename)] = hash
 
     return result
 
-  def __can_skip(self, action, inputs, disk_inputs, outputs, test_result, dir):
+  def __can_skip(self, action, inputs, disk_inputs, outputs, config):
     # There should be no such thing as an action without outputs, but if we
     # see one we'll do the conservative thing and not skip it.
     if len(outputs) == 0:
       return (False, None)
 
     # Look up the hash of the action which produced these outputs last time.
-    last_hash = self.__cache.get(outputs[0].filename)
+    last_hash = self.__cache.get((config.name, outputs[0].filename))
     if last_hash is None:
       return (False, None)    # Nothing in cache, must re-run.
 
     # All outputs must have the same hash.
     for output in outputs[1:]:
-      if self.__cache.get(output.filename) != last_hash:
+      if self.__cache.get((config.name, output.filename)) != last_hash:
         return (False, None)
 
     # All disk inputs must exist.
@@ -311,14 +319,15 @@ class CachingRunner(ActionRunner):
         return (False, None)
 
     # Compute new hash and compare.
-    new_hash = self.__hash(action, inputs, disk_inputs, outputs, dir)
+    new_hash = self.__hash(
+        action, inputs, disk_inputs, outputs, config.root_dir)
     if new_hash != last_hash:
       return (False, new_hash)
 
     # Make sure all outputs exist.  We do this last to avoid touching the
     # filesystem when we don't have to.
     for output in outputs:
-      if not dir.exists(output.filename):
+      if not config.root_dir.exists(output.filename):
         return (False, new_hash)
 
     return (True, new_hash)

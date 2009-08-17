@@ -168,14 +168,17 @@ def _args_to_rules(loader, args):
       yield target
 
 def _restore_pickle(obj, dir, filename):
-  disk_file = dir.get_disk_path(filename)
-  if os.path.exists(disk_file):
-    db = open(disk_file, "rb")
+  if dir is not None:
+    filename = dir.get_disk_path(filename)
+  if os.path.exists(filename):
+    db = open(filename, "rb")
     obj.restore(cPickle.load(db))
     db.close()
 
 def _save_pickle(obj, dir, filename):
-  db = open(dir.get_disk_path(filename), "wb")
+  if dir is not None:
+    filename = dir.get_disk_path(filename)
+  db = open(filename, "wb")
   cPickle.dump(obj.save(), db, cPickle.HIGHEST_PROTOCOL)
   db.close()
 
@@ -357,7 +360,8 @@ def build(config, argv):
     caching_runner = CachingRunner(runner, console)
     runner = caching_runner
 
-    _restore_pickle(caching_runner, config.root_dir, "cache.pickle")
+    # Note that all configurations share a common cache.pickle.
+    _restore_pickle(caching_runner, None, "cache.pickle")
 
   loader = Loader(config.root_dir)
   builder = Builder(console)
@@ -386,7 +390,7 @@ def build(config, argv):
     for thread in thread_objects:
       thread.join()
   finally:
-    _save_pickle(caching_runner, config.root_dir, "cache.pickle")
+    _save_pickle(caching_runner, None, "cache.pickle")
 
   if builder.failed:
     return 1
@@ -411,6 +415,14 @@ def clean(config, argv):
     if name == "--expunge":
       expunge = True
 
+  # All configurations share one cache.  It's *probably* harmless to leave it
+  # untouched, but then again if the implementation was perfect then "clean"
+  # would never be necessary.  So we nuke it.
+  # TODO(kenton):  We could load the cache and remove only the entries that
+  #   are specific to the configs being cleaned.
+  if os.path.exists("cache.pickle"):
+    os.remove("cache.pickle")
+
   for linked_config in config.get_all_linked_configs():
     if linked_config.name is None:
       print "Cleaning default config."
@@ -421,7 +433,7 @@ def clean(config, argv):
       if linked_config.root_dir.exists(dir):
         shutil.rmtree(linked_config.root_dir.get_disk_path(dir))
 
-    for file in [ "mem.pickle", "env.pickle", "cache.pickle" ]:
+    for file in [ "mem.pickle", "env.pickle" ]:
       if linked_config.root_dir.exists(file):
         os.remove(linked_config.root_dir.get_disk_path(file))
 
