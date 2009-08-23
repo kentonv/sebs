@@ -47,6 +47,7 @@ class _ContextImpl(Context):
     self.full_filename = os.path.join("src", filename)
     self.directory = os.path.dirname(filename)
     self.timestamp = root_dir.getmtime(self.full_filename)
+    self.__root_dir = root_dir
 
   def local_filename(self, artifact):
     if isinstance(artifact, str):
@@ -70,6 +71,21 @@ class _ContextImpl(Context):
 
     return self.__loader.source_artifact(
       os.path.join("src", self.directory, filename))
+
+  def source_artifact_list(self, filenames):
+    typecheck(filenames, list)
+
+    result = []
+    for filename in filenames:
+      if isinstance(filename, Artifact):
+        result.append(filename)
+      else:
+        self.__validate_artifact_name(filename)
+        full_name = os.path.join("src", self.directory, filename)
+        for filename in self.__root_dir.expand_glob(full_name):
+          result.append(self.__loader.source_artifact(filename))
+
+    return result
 
   def environment_artifact(self, env_name):
     self.__validate_env_name(env_name)
@@ -161,6 +177,7 @@ class _Builtins(object):
     self.ConditionalCommand = command.ConditionalCommand
     self.SubprocessCommand  = command.SubprocessCommand
     self.DepFileCommand     = command.DepFileCommand
+    self.MirrorCommand      = command.MirrorCommand
 
     self.__loader = loader
     self.__context = context

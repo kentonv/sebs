@@ -46,7 +46,7 @@ class Binary(sebs.Rule):
                                     deps = ([sebs.Rule], []))
 
   def _expand(self, args):
-    transitive_sources = args.srcs.copy()
+    transitive_sources = list(args.srcs)
     for dep in args.deps:
       if not isinstance(dep, Library):
         raise DefinitionError("Dependency is not a Python library: %s" % dep)
@@ -56,9 +56,12 @@ class Binary(sebs.Rule):
     make_bin = self.context.source_artifact("make_py_binary.py")
     action = self.context.action(self, "par")
     output = self.context.output_artifact("bin", args.name, action)
+    path = [ sebs.SubprocessCommand.DirectoryToken("src"), ":",
+             sebs.SubprocessCommand.DirectoryToken("tmp") ]
     action.set_command(
       sebs.SubprocessCommand(action,
-        [make_bin, args.main, output] + transitive_sources))
+        [make_bin, "-m", args.main, "-o", output, "-p", path] +
+        transitive_sources))
     self.outputs = [output]
 
 class Test(sebs.Test):
@@ -74,7 +77,8 @@ class Test(sebs.Test):
       implicit.extend(dep.srcs)
     action = self.context.action(self, "test", args.main.filename)
     output = self.context.derived_artifact(args.main, "_output.txt", action)
-    result = self.context.derived_artifact(args.main, "_result", action)
+    result = self.context.derived_artifact(args.main, "_result", action,
+                                           inmem=True)
 
     action.set_command(sebs.SubprocessCommand(action, ["python", args.main],
                                               implicit = implicit,

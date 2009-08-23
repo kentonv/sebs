@@ -35,6 +35,7 @@ Commands define exactly what an Action does.
 
 import cStringIO
 import os
+import shutil
 import subprocess
 
 from sebs.core import Artifact, Action, DefinitionError, ContentToken, \
@@ -47,6 +48,13 @@ class CommandContext(object):
     on-disk already and use_temporary is true, a temporary file representing
     the artifact will be created.  If use_temporary is false, then this method
     returns None if the file does not have a disk path."""
+    raise NotImplementedError
+
+  def get_disk_directory_path(self, dirname):
+    """Get the on-disk path of a particular directory.  Useful e.g. to get the
+    location of the "include" directory for the current configuration in order
+    to pass it to the compiler.  Raises an exception if the directory is not
+    on disk (e.g. "mem")."""
     raise NotImplementedError
 
   def read(self, artifact):
@@ -360,15 +368,21 @@ class ConditionalCommand(Command):
 class SubprocessCommand(Command):
   """Command which launches a separate process."""
 
+  class DirectoryToken(object):
+    def __init__(self, dirname):
+      typecheck(dirname, basestring)
+      self.dirname = dirname
+
   def __init__(self, action, args, implicit = [],
                capture_stdout=None, capture_stderr=None,
-               capture_exit_status=None):
+               capture_exit_status=None, working_dir=None):
     typecheck(action, Action)
     typecheck(args, list)
     typecheck(implicit, list, Artifact)
     typecheck(capture_stdout, Artifact)
     typecheck(capture_stderr, Artifact)
     typecheck(capture_exit_status, Artifact)
+    typecheck(working_dir, basestring)
 
     self.__verify_args(args)
 
@@ -378,6 +392,7 @@ class SubprocessCommand(Command):
     self.__capture_stdout = capture_stdout
     self.__capture_stderr = capture_stderr
     self.__capture_exit_status = capture_exit_status
+    self.__working_dir = working_dir
 
   def enumerate_artifacts(self, artifact_enumerator):
     if self.__capture_stdout is not None:
@@ -395,6 +410,8 @@ class SubprocessCommand(Command):
         self.artifacts = set()
       def get_disk_path(self, artifact):
         self.artifacts.add(artifact)
+        return ""
+      def get_disk_directory_path(self, dirname):
         return ""
       def read(self, artifact):
         self.artifacts.add(artifact)
@@ -450,10 +467,16 @@ class SubprocessCommand(Command):
     #   take advantage of that to import SEBS implementation modules.
     env["PYTHONPATH"] = "src"
 
+    if self.__working_dir is None:
+      cwd = None
+    else:
+      cwd = os.path.join(os.getcwd(),
+                         context.get_disk_directory_path(self.__working_dir))
+
     exit_code, stdout_text, stderr_text = \
         context.subprocess(formatted_args,
                            stdout = stdout, stderr = stderr,
-                           env = env)
+                           env = env, cwd = cwd)
 
     if stdout == subprocess.PIPE:
       if self.__capture_stdout is None:
@@ -481,9 +504,14 @@ class SubprocessCommand(Command):
         return False
 
   def print_(self, output):
+    if self.__working_dir is not None:
+      output.write("cd %s && " % self.__working_dir)
+
     class DummyContext(CommandContext):
       def get_disk_path(self, artifact):
         return artifact.filename
+      def get_disk_directory_path(self, dirname):
+        return dirname
       def read(self, artifact):
         return "$(%s)" % artifact.filename
 
@@ -508,7 +536,8 @@ class SubprocessCommand(Command):
         self.__verify_args(arg)
       elif not isinstance(arg, basestring) and \
            not isinstance(arg, Artifact) and \
-           not isinstance(arg, ContentToken):
+           not isinstance(arg, ContentToken) and \
+           not isinstance(arg, SubprocessCommand.DirectoryToken):
         raise TypeError("Invalid argument: %s" % arg)
 
   def __format_args(self, args, context, split_content=True):
@@ -524,6 +553,8 @@ class SubprocessCommand(Command):
             yield part
         else:
           yield content
+      elif isinstance(arg, SubprocessCommand.DirectoryToken):
+        yield context.get_disk_directory_path(arg.dirname)
       elif isinstance(arg, list):
         yield "".join(self.__format_args(
             arg, context, split_content = False))
@@ -534,14 +565,17 @@ class SubprocessCommand(Command):
     hasher.update("SubprocessCommand:")
     self.__hash_args(self.__args, hasher)
     if self.__capture_stdout is not None:
-      hasher.update(">");
+      hasher.update(">")
       _hash_string_and_length(self.__capture_stdout.filename, hasher)
     if self.__capture_stderr is not None:
-      hasher.update("&");
+      hasher.update("&")
       _hash_string_and_length(self.__capture_stderr.filename, hasher)
     if self.__capture_exit_status is not None:
-      hasher.update("?");
+      hasher.update("?")
       _hash_string_and_length(self.__capture_exit_status.filename, hasher)
+    if self.__working_dir is not None:
+      hasher.update("/")
+      _hash_string_and_length(self.__working_dir, hasher)
 
     # Hash implicit files in sorted order so that use of hash sets by the
     # creator doesn't cause problems.
@@ -573,6 +607,9 @@ class SubprocessCommand(Command):
       elif isinstance(arg, ContentToken):
         hasher.update("c")
         _hash_string_and_length(arg.artifact.filename, hasher)
+      elif isinstance(arg, SubprocessCommand.DirectoryToken):
+        hasher.update("d")
+        _hash_string_and_length(arg.dirname, hasher)
       elif isinstance(arg, list):
         hasher.update("l")
         self.__hash_args(arg, hasher)
@@ -616,3 +653,93 @@ class DepFileCommand(Command):
   def hash(self, hasher):
     hasher.update("DepFileCommand:")
     self.__command.hash(hasher)
+
+# ====================================================================
+
+class MirrorCommand(Command):
+  """A Command which sets up a directory to contain mirrors of a set of files.
+  It may use symbolic links, hard links, or copies depending on what the OS
+  supports."""
+
+  def __init__(self, link_map, output_dir, dummy_output_artifact):
+    typecheck(link_map, dict)
+    typecheck(output_dir, basestring)
+    typecheck(dummy_output_artifact, Artifact)
+
+    for key, value in link_map.iteritems():
+      typecheck(key, basestring)
+      typecheck(value, Artifact)
+
+    self.__link_map = link_map
+    self.__output_dir = output_dir
+    self.__dummy_output_artifact = dummy_output_artifact
+
+  def enumerate_artifacts(self, artifact_enumerator):
+    for input in self.__link_map.itervalues():
+      artifact_enumerator.add_input(input)
+    artifact_enumerator.add_output(self.__dummy_output_artifact)
+
+  def run(self, context, log):
+    dir = context.get_disk_directory_path(self.__output_dir)
+
+    if not os.path.exists(dir):
+      os.makedirs(dir)
+
+    for key, value in self.__link_map.iteritems():
+      source = context.get_disk_path(value, use_temporary=False)
+      dest = os.path.join(dir, key)
+
+      parent = os.path.dirname(dest)
+      if not os.path.exists(parent):
+        os.makedirs(parent)
+
+      if source is None:
+        log.write("%s: cannot create link to virtual file.\n" %
+                  self.__source_artifact.filename)
+        return False
+      if dest is None:
+        log.write("%s: cannot create link in virtual location.\n" %
+                  self.__source_artifact.filename)
+        return False
+      if not os.path.exists(source):
+        log.write("%s: file not found.\n" % source)
+        return False
+
+      if os.path.lexists(dest):
+        os.remove(dest)
+
+      try:
+        # TODO(kenton):  Use symbolic links?  It's a bit harder because we would
+        #   have to compute the path to dest relative to source, which can be
+        #   non-trivial when the paths happen to contain components which are
+        #   themselves symlinks (which means that ".." may not go where we
+        #   expect).  We could just use absolute paths but that means that the
+        #   resulting link tree cannot be used by another machine which happens
+        #   to map the working directory to a different absolute path -- this
+        #   could be problematic if we ever attempt to implement distributed
+        #   tests backed by NFS.
+        os.link(source, dest)
+      except os.error, message:
+        log.write("ln %s %s: %s\n" % (source, dest, message))
+        return False
+
+    context.write(self.__dummy_output_artifact,
+                  "\n".join(self.__link_map.iterkeys()))
+
+    return True
+
+  def print_(self, output):
+    output.write("linktree %s {" % self.__output_dir)
+    for key, value in self.__link_map.iteritems():
+      output.write("  %s -> %s\n" % (key, value.filename))
+    output.write("}")
+
+  def hash(self, hasher):
+    hasher.update("LinkCommand:")
+    for key, value in self.__link_map.iteritems():
+      hasher.update("+")
+      _hash_string_and_length(key, hasher)
+      _hash_string_and_length(value.filename, hasher)
+    hasher.update("-")
+    _hash_string_and_length(self.__output_dir, hasher)
+    _hash_string_and_length(self.__dummy_output_artifact.filename, hasher)

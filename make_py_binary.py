@@ -30,41 +30,83 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""Constructs a par file from a set of Python sources."""
+"""Constructs a par file from a set of Python sources.
 
+Usage:
+  make_py_binary.py -m MAIN_MODULE -o PARFILE [-p PYTHONPATH] SOURCE_FILES
+"""
+
+import getopt
 import os
 import stat
 import sys
 import tempfile
 import zipfile
 
-temporary = tempfile.NamedTemporaryFile()
-tempname = temporary.name
-temporary.close()
+class UsageError(Exception):
+  pass
 
-zip = zipfile.ZipFile(tempname, "w")
+def main(argv):
+  try:
+    opts, args = getopt.getopt(sys.argv[1:], "hm:o:p:", ["--help"])
+  except getopt.error, message:
+    raise UsageError(message)
 
-for file in sys.argv[3:]:
-  if file.startswith("src/") or file.startswith("tmp/"):
-    arcname = file[4:]
-  else:
+  main_module = None
+  output = None
+  path = []
+
+  for name, value in opts:
+    if name in ("-h", "--help"):
+      print __doc__
+      return 0
+    elif name == "-m":
+      main_module = value
+    elif name == "-o":
+      output = value
+    elif name == "-p":
+      path.extend(value.split(":"))
+
+  if main_module is None:
+    raise UsageError("Missing required flag -m.")
+  if output is None:
+    raise UsageError("Missing required flag -o.")
+
+  temporary = tempfile.NamedTemporaryFile()
+  tempname = temporary.name
+  temporary.close()
+
+  zip = zipfile.ZipFile(tempname, "w")
+
+  for file in args:
     arcname = file
-  zip.write(file, arcname)
+    for dir in path:
+      if file.startswith(dir + "/"):
+        arcname = file[(len(dir) + 1):]
+        break
+    zip.write(file, arcname)
 
-zip.close()
+  zip.close()
 
-fd = os.open(sys.argv[2], os.O_WRONLY | os.O_TRUNC | os.O_CREAT, 0777)
-file = os.fdopen(fd, "w")
+  fd = os.open(output, os.O_WRONLY | os.O_TRUNC | os.O_CREAT, 0777)
+  file = os.fdopen(fd, "w")
 
-file.write(
-"""#! /bin/sh
-PYTHONPATH=`which $0`:"$PYTHONPATH" python -m %s "$@" || exit 1
-exit 0
-""" % sys.argv[1])
+  file.write(
+      "#! /bin/sh\n"
+      "PYTHONPATH=`which $0`:\"$PYTHONPATH\" python -m %s \"$@\" || exit 1\n"
+      "exit 0\n" % main_module)
 
-temporary = open(tempname, "rb")
-file.write(temporary.read())
-temporary.close()
-os.remove(tempname)
+  temporary = open(tempname, "rb")
+  file.write(temporary.read())
+  temporary.close()
+  os.remove(tempname)
 
-file.close()
+  file.close()
+
+if __name__ == "__main__":
+  try:
+    sys.exit(main(sys.argv))
+  except UsageError, error:
+    print >>sys.stderr, error.message
+    print >>sys.stderr, "for help use --help"
+    sys.exit(2)

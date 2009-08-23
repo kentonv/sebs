@@ -36,7 +36,7 @@ import subprocess
 import tempfile
 import signal
 
-from sebs.core import Action, Artifact, ContentToken
+from sebs.core import Action, Artifact, ContentToken, DefinitionError
 from sebs.filesystem import Directory
 from sebs.helpers import typecheck
 from sebs.command import CommandContext, Command, ArtifactEnumerator
@@ -89,6 +89,13 @@ class _CommandContextImpl(CommandContext):
         os.chmod(result, 0700)
         self.__temp_files_for_mem[filename] = result
     return result
+
+  def get_disk_directory_path(self, dirname):
+    result = self.__working_dir.get_disk_path(dirname)
+    if result is None:
+      raise DefinitionError("Not a disk directory: " + dirname)
+    else:
+      return result
 
   def read(self, artifact):
     filename = artifact.filename

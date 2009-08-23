@@ -29,6 +29,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import glob
 import os
 import shutil
 import time
@@ -94,6 +95,11 @@ class Directory(object):
 
     typecheck(filename, basestring)
     return None
+
+  def expand_glob(self, pattern):
+    """Interprets pattern as a shell-style glob and expands it, returning an
+    iterator over matching filenames."""
+    raise NotImplementedError
 
 class DiskDirectory(Directory):
   def __init__(self, path):
@@ -169,6 +175,12 @@ class DiskDirectory(Directory):
 
   def get_disk_path(self, filename):
     return os.path.join(self.__path, filename)
+
+  def expand_glob(self, pattern):
+    prefix = self.__path + "/"
+    for match in glob.iglob(os.path.join(self.__path, pattern)):
+      assert match.startswith(prefix)
+      yield match[len(prefix):]
 
 class VirtualDirectory(Directory):
   def __init__(self):
@@ -259,6 +271,11 @@ class VirtualDirectory(Directory):
       self.mkdir(os.path.dirname(filename))
       self.__dirs.add(filename)
 
+  def expand_glob(self, pattern):
+    # TODO(kenton):  Implement?  Currently not needed since we only allow
+    #   globs on the source directory.
+    raise NotImplementedError("Globs not implemented on virtual directories.")
+
 class MappedDirectory(Directory):
   """A directory which wraps some other set of directories, choosing which
   one to use based on filename.  A Mapping object is used to map each filename
@@ -310,3 +327,17 @@ class MappedDirectory(Directory):
 
   def get_disk_path(self, filename):
     return self.__do_mapping("get_disk_path", filename)
+
+  def expand_glob(self, pattern):
+    # We actually have to map back the results, complicating matters.
+    (directory, mapped_pattern) = self.__mapping.map(pattern)
+
+    if not pattern.endswith(mapped_pattern):
+      raise NotImplementedError(
+          "MappedDirectory.expand_glob() currently does not work if applying "
+          "the mapping to the pattern does anything other than remove some "
+          "prefix.")
+
+    prefix = pattern[:-len(mapped_pattern)]
+    for mapped_name in directory.expand_glob(mapped_pattern):
+      yield prefix + mapped_name
