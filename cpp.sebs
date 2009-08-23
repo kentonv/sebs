@@ -69,11 +69,12 @@ def _option(env_name, default, description):
     return _EnvironmentOption(env_name = env_name, default = default,
                               description = description)
 
-cc       = _option("CC"      , "cc"    , "C compiler"        )
-cxx      = _option("CXX"     , "c++"   , "C++ compiler"      )
-cflags   = _option("CFLAGS"  , "-O2 -g", "C compiler flags"  )
-cxxflags = _option("CXXFLAGS", cflags  , "C++ compiler flags")
-ldflags  = _option("LDFLAGS" , ""      , "linker flags"      )
+cc       = _option("CC"      , "cc"    , "C compiler"             )
+cxx      = _option("CXX"     , "c++"   , "C++ compiler"           )
+ar       = _option("AR"      , "ar"    , "Static library archiver")
+cflags   = _option("CFLAGS"  , "-O2 -g", "C compiler flags"       )
+cxxflags = _option("CXXFLAGS", cflags  , "C++ compiler flags"     )
+ldflags  = _option("LDFLAGS" , ""      , "linker flags"           )
 
 class SystemLibrary(sebs.Rule):
   argument_spec = sebs.ArgumentSpec(name = str,
@@ -209,10 +210,11 @@ class Library(_Base):
     rm = sebs.SubprocessCommand(static_link_action, ["rm", "-f", static_lib])
 
     # Create the library archive, with a symbol table.
-    ar = sebs.SubprocessCommand(static_link_action,
-                                ["ar", "-qcs", static_lib] + self.objects)
+    ar.expand_once()
+    ar_command = sebs.SubprocessCommand(
+        static_link_action, [ar.value, "-qcs", static_lib] + self.objects)
 
-    static_link_action.set_command(sebs.DoAllCommand([rm, ar]))
+    static_link_action.set_command(sebs.DoAllCommand([rm, ar_command]))
 
     self.static_library = static_lib
     self.outputs = [static_lib]
@@ -228,13 +230,17 @@ class Binary(_Base):
 
     link_action = self.context.action(self, "link")
 
+    exeext = self.context.environment_artifact("EXEEXT")
+
     if args.name is None:
       # Output binary to intermediate directory.
+      binary_name = "%s_bin" % self.anonymous_name()
       output = self.context.intermediate_artifact(
-          "%s_bin" % self.anonymous_name(), link_action)
+          binary_name, link_action, configured_name = [binary_name, exeext])
     else:
       output = self.context.output_artifact(
-          "bin", args.name, link_action)
+          "bin", args.name, link_action,
+          configured_name = [args.name, exeext])
 
     ordered_libs = \
       [(-level, dep.filename, dep) for level, dep in self.transitive_deps]

@@ -66,17 +66,8 @@ class _ArtifactEnumeratorImpl(ArtifactEnumerator):
     self.disk_inputs.append(filename)
 
   def read(self, artifact):
-    # Note:  Can't call state_map.read_if_clean because it won't record all
-    #   the artifacts it reads as inputs.
     self.inputs.append(artifact)
-    if self.__state_map.artifact_state(self.__config, artifact).is_dirty:
-      return None
-    else:
-      real_name = artifact.real_name(self.read)
-      if real_name is None:
-        return None
-      else:
-        return self.__config.root_dir.read(real_name)
+    return self.__state_map.read_if_clean(self.__config, artifact)
 
   def read_previous_output(self, artifact):
     if artifact.action is not self.__action:
@@ -99,11 +90,21 @@ class _ArtifactState(object):
     self.config = config
 
     real_name = state_map.real_name(config, artifact)
-    if real_name is not None and root_dir.exists(real_name):
+    if real_name is None:
+      # We couldn't get this artifact's name, because some things the name
+      # depends on are dirty.  All the artifacts needed to compute this
+      # artifact's name will be registered as inputs to the action which
+      # creates this artifact, so we know that the creating action won't run
+      # until we can compute this artifact's name, and we know that any
+      # dependent actions won't run until the creating action runs.  So we're
+      # all good.
+      self.timestamp = -1
+      self.is_dirty = True
+    elif root_dir.exists(real_name):
       self.timestamp = root_dir.getmtime(real_name)
       self.is_dirty = self.__decide_if_dirty(state_map)
     elif artifact.action is not None:
-      # Derived artifact doesn't exist yet, or we don't yet know its name.
+      # Derived artifact doesn't exist yet.
       self.timestamp = -1
       self.is_dirty = True
     else:
@@ -276,7 +277,7 @@ class _StateMap(object):
     state = self.artifact_state(config, artifact)
     if state.is_dirty:
       return None
-    real_name = artifact.real_name(self.get_read_if_clean(state.config))
+    real_name = self.real_name(state.config, state.artifact)
     if real_name is None:
       return None
     return state.config.root_dir.read(real_name)

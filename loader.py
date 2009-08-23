@@ -103,6 +103,9 @@ class _ContextImpl(Context):
     self.__validate_artifact_name(filename, configured_name)
     typecheck(action, Action)
 
+    if configured_name is not None:
+      configured_name = ["tmp/%s/" % self.directory] + configured_name
+
     return self.__loader.derived_artifact(
       os.path.join("tmp", self.directory, filename), action,
       configured_name = configured_name)
@@ -122,6 +125,9 @@ class _ContextImpl(Context):
     if directory not in ("bin", "include", "lib", "share"):
       raise DefinitionError(
         "'%s' is not a valid output directory." % directory)
+
+    if configured_name is not None:
+      configured_name = [directory + "/"] + configured_name
 
     return self.__loader.derived_artifact(
       os.path.join(directory, filename), action,
