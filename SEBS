@@ -38,6 +38,7 @@ sebs_lib = python.Library(
   srcs = [ "__init__.py",
            "builder.py",
            "command.py",
+           "console.py",
            "core.py",
            "filesystem.py",
            "helpers.py",
@@ -58,27 +59,42 @@ loader_test = python.Test(main = "loader_test.py", deps = [sebs_lib])
 builder_test = python.Test(main = "builder_test.py", deps = [sebs_lib])
 
 # TODO(kenton):  Move elsewhere.
-import os
 class ShellTest(_sebs.Test):
-  argument_spec = _sebs.ArgumentSpec(src = _sebs.Artifact)
+  argument_spec = _sebs.ArgumentSpec(src = _sebs.Artifact,
+                                     data = ([_sebs.Artifact], []))
 
   def _expand(self, args):
-    action = self.context.action(self, "test", args.src.filename)
+    runfiles_name = self.label + ".runfiles"
+    runfiles_dir = "/".join(["tmp", self.context.directory, runfiles_name])
+
+    runfiles_action = self.context.action(self, "setup")
+    runfiles_middleman = self.context.memory_artifact(
+        runfiles_name, runfiles_action)
+    runfiles = {}
+    for data in args.data:
+      runfiles[data.filename] = data
+
+    runfiles_action.set_command(
+        _sebs.MirrorCommand(runfiles, runfiles_dir, runfiles_middleman))
+
+    action = self.context.action(self, "test")
     src_name = self.context.local_filename(args.src)
 
-    output = self.context.intermediate_artifact(
-      os.path.splitext(src_name)[0] + "_output.txt", action)
-    result = self.context.memory_artifact(
-      os.path.splitext(src_name)[0] + "_result", action)
+    output = self.context.intermediate_artifact(self.label + "_output.txt",
+                                                action)
+    result = self.context.memory_artifact(self.label + "_result", action)
 
     action.set_command(
         _sebs.SubprocessCommand(action, [args.src],
+                                implicit = [runfiles_middleman] + args.data,
                                 capture_stdout = output,
                                 capture_stderr = output,
-                                capture_exit_status = result))
+                                capture_exit_status = result,
+                                working_dir = runfiles_dir))
 
     self.test_result_artifact = result
     self.test_output_artifact = output
     self.outputs = []
 
-cpp_test = ShellTest(src = "cpp_test/cpp_test.sh")
+cpp_test = ShellTest(src = "cpp_test/cpp_test.sh",
+                     data = [sebs, "cpp.sebs", "cpp_test/*"])

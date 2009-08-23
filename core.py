@@ -180,7 +180,10 @@ class Context(object):
                    directory).
     full_filename  Like filename, but includes the full path of the file
                    (either absolute or relative to the directory where SEBS
-                   was invoked).  Useful for error messages."""
+                   was invoked).  Useful for error messages.
+    directory      The directory (relative to "src") containing the SEBS
+                   file.
+    timestamp      The last modification time of the SEBS file."""
 
   __current_context = None
 
@@ -423,7 +426,9 @@ class ArgumentSpec(object):
                         (function_name, arg_name, value))
 
       if arg_type[0] is Artifact:
-        # We pass lists of artifacts directly to source_artifact_list().
+        # Lists of artifacts have special capabilities:  they can contain
+        # globs and rules in addition to strings and artifacts.
+        value = list(self.__expand_rules(value))
         for element in value:
           if not isinstance(element, basestring) and \
              not isinstance(element, Artifact):
@@ -435,12 +440,21 @@ class ArgumentSpec(object):
       else:
         return [self.__validate_arg(function_name, arg_name, context,
                                     element, arg_type[0])
-                for element in value ]
+                for element in value]
     elif arg_type is Artifact:
       if isinstance(value, basestring):
         return context.source_artifact(value)
       elif isinstance(value, Artifact):
         return value
+      elif isinstance(value, Rule):
+        # Expand the Rule.  It must produce a single output.
+        value = list(self.__expand_rules([value]))
+        if len(value) != 1:
+          raise TypeError(
+              "%s(), argument '%s':  Exactly one artifact is required, but "
+              "the given rule has %d outputs." %
+              (function_name, arg_name, len(value)))
+        return context.source_artifact(value[0])
       else:
         raise TypeError("%s(), argument '%s':  Expected source file name or "
                         "artifact, got: %s" % (function_name, arg_name, value))
@@ -450,6 +464,15 @@ class ArgumentSpec(object):
       else:
         raise TypeError("%s(), argument '%s':  Expected %s, got: %s" %
                         (function_name, arg_name, arg_type, value))
+
+  def __expand_rules(self, list):
+    for element in list:
+      if isinstance(element, Rule):
+        element.expand_once()
+        for output in element.outputs:
+          yield output
+      else:
+        yield element
 
 class Rule(object):
   """Base class for a rule which can be built.  Generally, SEBS files contain
@@ -503,8 +526,7 @@ class Rule(object):
         # but we want to use the innermost match, so we want to continue the
         # loop here and repeatedly overwrite self.line.
 
-    self.__args = self.argument_spec.validate(
-        str(self.__class__), self.context, kwargs)
+    self.__args = kwargs
 
   def __get_name(self):
     sebsfile = self.context.filename
@@ -536,7 +558,8 @@ class Rule(object):
       raise DefinitionError("Rule cyclically depends on self: %s" % self.name)
     elif not self.__expanded:
       self.__expanded = None
-      self._expand(self.__args)
+      self._expand(self.argument_spec.validate(
+          str(self.__class__), self.context, self.__args))
       self.__expanded = True
 
 class Test(Rule):

@@ -88,15 +88,16 @@ class CoreTest(unittest.TestCase):
 
   def testInitAndValidate(self):
     context = MockContext("foo.sebs", "foo.sebs")
-    self.assertRaises(TypeError, MockRule, context = context,
-                      int_arg = "bar")
-    self.assertRaises(TypeError, MockRule, context = context,
-                      list_int_arg = 1)
-    self.assertRaises(TypeError, MockRule, context = context,
-                      list_int_arg = ["bar"])
-    self.assertRaises(TypeError, MockRule, context = context,
-                      artifact_arg = 1)
-    self.assertRaises(TypeError, RuleWithRequiredArg, context = context)
+    self.assertRaises(TypeError,
+        MockRule(context = context, int_arg = "bar").expand_once)
+    self.assertRaises(TypeError,
+        MockRule(context = context, list_int_arg = 1))
+    self.assertRaises(TypeError,
+        MockRule(context = context, list_int_arg = ["bar"]))
+    self.assertRaises(TypeError,
+        MockRule(context = context, artifact_arg = 1))
+    self.assertRaises(TypeError,
+        RuleWithRequiredArg(context = context).expand_once)
 
     # Default values.
     rule = MockRule(context = context)

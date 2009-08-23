@@ -177,6 +177,7 @@ class _Builtins(object):
     self.ConditionalCommand = command.ConditionalCommand
     self.SubprocessCommand  = command.SubprocessCommand
     self.DepFileCommand     = command.DepFileCommand
+    self.MirrorCommand      = command.MirrorCommand
 
     self.__loader = loader
     self.__context = context

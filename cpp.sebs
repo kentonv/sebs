@@ -149,10 +149,14 @@ class _Base(sebs.Rule):
         action.set_command(
           sebs.DepFileCommand(
             sebs.SubprocessCommand(action,
-                                   [cxx.value, cxxflags.value,
-                                    "-Isrc", "-Itmp", "-Iinclude", "-MD",
-                                    "-c", src, "-o", obj],
-                                   implicit = generated_headers),
+              [
+                cxx.value, cxxflags.value,
+                ["-I", sebs.SubprocessCommand.DirectoryToken("src")],
+                ["-I", sebs.SubprocessCommand.DirectoryToken("tmp")],
+                ["-I", sebs.SubprocessCommand.DirectoryToken("include")],
+                "-MD", "-c", src, "-o", obj
+              ],
+              implicit = generated_headers),
             dep))
       elif ext not in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
         raise sebs.DefinitionError(
