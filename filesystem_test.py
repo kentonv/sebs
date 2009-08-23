@@ -165,6 +165,28 @@ class DiskDirectoryTest(DirectoryTest, unittest.TestCase):
     self.assertEquals(os.path.join(self.tempdir, "foo/bar"),
                       self.dir.get_disk_path("foo/bar"))
 
+  def testGlob(self):
+    self.dir.write("foo.qux", "")
+    self.dir.write("bar.qux", "")
+    self.dir.write("baz.qux", "")
+    self.dir.write("foo.corge", "")
+    self.dir.write("bar.corge", "")
+    self.dir.write("baz.corge", "")
+
+    self.assertEquals(set(["foo.qux"]),
+                      set(self.dir.expand_glob("foo.qux")))
+    self.assertEquals(set(["foo.qux", "bar.qux", "baz.qux"]),
+                      set(self.dir.expand_glob("*.qux")))
+    self.assertEquals(set(["foo.corge", "bar.corge", "baz.corge"]),
+                      set(self.dir.expand_glob("*.corge")))
+    self.assertEquals(set(["foo.qux", "foo.corge"]),
+                      set(self.dir.expand_glob("foo.*")))
+    self.assertEquals(set(["foo.qux", "bar.qux", "baz.qux",
+                           "foo.corge", "bar.corge", "baz.corge"]),
+                      set(self.dir.expand_glob("*")))
+    self.assertEquals(set([]),
+                      set(self.dir.expand_glob("grault")))
+
 class VirtualDirectoryTest(DirectoryTest, unittest.TestCase):
   def setUp(self):
     self.dir = VirtualDirectory()
@@ -203,6 +225,47 @@ class MappedDirectoryTest(DirectoryTest, unittest.TestCase):
 
   def testGetDiskPath(self):
     self.assertEquals(None, self.dir.get_disk_path("foo/bar"))
+
+  def testGlob(self):
+    # Must test with disk directory...
+    tempdir = tempfile.mkdtemp()
+    try:
+      disk_dir = DiskDirectory(tempdir)
+
+      disk_dir.write("foo.qux", "")
+      disk_dir.write("bar.qux", "")
+      disk_dir.write("baz.qux", "")
+      disk_dir.write("foo.corge", "")
+      disk_dir.write("bar.corge", "")
+      disk_dir.write("baz.corge", "")
+
+      class PrefixRemovingMapping(MappedDirectory.Mapping):
+        def __init__(self, prefix, real_dir):
+          super(PrefixRemovingMapping, self).__init__()
+          self.__prefix = prefix
+          self.__real_dir = real_dir
+
+        def map(self, filename):
+          assert filename.startswith(self.__prefix)
+          return (self.__real_dir, filename[len(self.__prefix):])
+
+      dir = MappedDirectory(PrefixRemovingMapping("a/", disk_dir))
+
+      self.assertEquals(set(["a/foo.qux"]),
+                        set(dir.expand_glob("a/foo.qux")))
+      self.assertEquals(set(["a/foo.qux", "a/bar.qux", "a/baz.qux"]),
+                        set(dir.expand_glob("a/*.qux")))
+      self.assertEquals(set(["a/foo.corge", "a/bar.corge", "a/baz.corge"]),
+                        set(dir.expand_glob("a/*.corge")))
+      self.assertEquals(set(["a/foo.qux", "a/foo.corge"]),
+                        set(dir.expand_glob("a/foo.*")))
+      self.assertEquals(set(["a/foo.qux", "a/bar.qux", "a/baz.qux",
+                             "a/foo.corge", "a/bar.corge", "a/baz.corge"]),
+                        set(dir.expand_glob("a/*")))
+      self.assertEquals(set([]),
+                        set(dir.expand_glob("a/grault")))
+    finally:
+      shutil.rmtree(tempdir)
 
 if __name__ == "__main__":
   unittest.main()

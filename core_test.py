@@ -43,7 +43,18 @@ class MockContext(Context):
     self.full_filename = full_filename
 
   def source_artifact(self, filename):
-    return Artifact("foo/" + filename, None)
+    if isinstance(filename, Artifact):
+      return filename
+    else:
+      return Artifact("foo/" + filename, None)
+
+  def source_artifact_list(self, filenames):
+    result = []
+    for filename in filenames:
+      if not isinstance(filename, Artifact):
+        filename = "glob(" + filename + ")"
+      result.append(self.source_artifact(filename))
+    return result
 
 class MockRule(Rule):
   argument_spec = ArgumentSpec(int_arg = (int, 321),
@@ -110,8 +121,10 @@ class CoreTest(unittest.TestCase):
     self.assertEqual(2, len(rule.args.list_artifact_arg))
     self.assertTrue(isinstance(rule.args.list_artifact_arg[0], Artifact))
     self.assertTrue(isinstance(rule.args.list_artifact_arg[1], Artifact))
-    self.assertEqual("foo/qux", rule.args.list_artifact_arg[0].filename)
-    self.assertEqual("foo/quux", rule.args.list_artifact_arg[1].filename)
+    self.assertEqual("foo/glob(qux)",
+                     rule.args.list_artifact_arg[0].filename)
+    self.assertEqual("foo/glob(quux)",
+                     rule.args.list_artifact_arg[1].filename)
 
     # Pass actual artifact for artifact params, instead of string.
     corge = Artifact("corge", None)
@@ -121,7 +134,8 @@ class CoreTest(unittest.TestCase):
     rule.expand_once()
     self.assertEqual(corge, rule.args.artifact_arg)
     self.assertEqual(corge, rule.args.list_artifact_arg[0])
-    self.assertEqual("foo/garply", rule.args.list_artifact_arg[1].filename)
+    self.assertEqual("foo/glob(garply)",
+                     rule.args.list_artifact_arg[1].filename)
 
     # Miss
     rule = RuleWithRequiredArg(context = context, int_arg = 123)

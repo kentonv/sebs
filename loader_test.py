@@ -130,9 +130,16 @@ sebs.import_("qux.sebs")
     self.assertEqual(1, self.loader.load_with_timestamp("qux.sebs")[1])
     self.assertEqual(2, self.loader.load_with_timestamp("quux.sebs")[1])
 
+class _MockGlobbingVirtualDirectory(VirtualDirectory):
+  def expand_glob(self, pattern):
+    if pattern == "src/foo/*":
+      return ["src/foo/qux", "src/foo/corge"]
+    else:
+      return [pattern]
+
 class ContextImplTest(unittest.TestCase):
   def setUp(self):
-    self.dir = VirtualDirectory()
+    self.dir = _MockGlobbingVirtualDirectory()
     self.dir.add("src/foo/bar.sebs", 0, """
 mock_rule = sebs.Rule()
 return_context = mock_rule.context
@@ -169,6 +176,11 @@ mock_test = sebs.Test()
     # Trying to create an artifact outside the directory fails.
     self.assertRaises(DefinitionError,
         self.context.source_artifact, "../parent")
+
+    self.assertEqual([artifact1], self.context.source_artifact_list(["qux"]))
+    self.assertEqual([artifact2], self.context.source_artifact_list(["corge"]))
+    self.assertEqual(set([artifact1, artifact2]),
+                     set(self.context.source_artifact_list(["*"])))
 
   def testAction(self):
     artifact = self.loader.source_artifact("blah")

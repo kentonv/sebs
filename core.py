@@ -223,6 +223,17 @@ class Context(object):
 
     raise NotImplementedError
 
+  def source_artifact_list(self, filenames):
+    """Call source_artifact() on each name in the given list and return a list
+    of results.  Additionally, the names may contain shell-style glob patters
+    (as implemented by Python's glob module).  These will be expanded before
+    converting to artifacts, so the returned list may be larger than the input
+    list.  Glob patterns will *only* match files in the primary source
+    directory -- not in tmp, mem, nor in any overlay/underlay source
+    directory."""
+
+    raise NotImplementedError
+
   def environment_artifact(self, env_name):
     """Similar to source_artifact(), but returns an artifact corresponding to an
     environment variable.  This looks like a file, but its contents correspond
@@ -403,9 +414,24 @@ class ArgumentSpec(object):
 
   def __validate_arg(self, function_name, arg_name, context, value, arg_type):
     if isinstance(arg_type, list):
-      return [
-          self.__validate_arg(function_name, arg_name, context, e, arg_type[0])
-          for e in value ]
+      if not isinstance(value, list):
+        raise TypeError("%s(), argument '%s':  Expected list, got: %s" %
+                        (function_name, arg_name, value))
+
+      if arg_type[0] is Artifact:
+        # We pass lists of artifacts directly to source_artifact_list().
+        for element in value:
+          if not isinstance(element, basestring) and \
+             not isinstance(element, Artifact):
+            raise TypeError(
+                "%s(), argument '%s':  Expected source file name or "
+                "artifact, got: %s" % (function_name, arg_name, element))
+
+        return context.source_artifact_list(value)
+      else:
+        return [self.__validate_arg(function_name, arg_name, context,
+                                    element, arg_type[0])
+                for element in value ]
     elif arg_type is Artifact:
       if isinstance(value, basestring):
         return context.source_artifact(value)
