@@ -170,7 +170,7 @@ class _Base(sebs.Rule):
                 ["-I", sebs.SubprocessCommand.DirectoryToken("include")],
                 "-MD", "-c", src, "-o", obj
               ],
-              implicit = generated_headers),
+              implicit = [dep] + generated_headers),
             dep))
       elif ext not in [".h", ".H", ".hh", ".hpp", ".hxx", ".h++"]:
         raise sebs.DefinitionError(

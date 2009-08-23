@@ -46,13 +46,21 @@ class MockRunner(ActionRunner):
   def __init__(self):
     self.actions = []
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, config,
+          real_name_map, lock):
     self.actions.append(action)
 
     # Hack for testDerivedCondition:  If the action is condition_builder then
     # copy cond_dep to cond.
     if action.name == "condition_builder":
       config.root_dir.write("cond", config.root_dir.read("cond_dep"))
+
+    for artifact in inputs + outputs:
+      if artifact not in real_name_map:
+        raise AssertionError("%s is not in real_name_map." % artifact)
+      if artifact.filename != real_name_map[artifact]:
+        raise AssertionError("%s had name %s in real_name_map." %
+            (artifact, real_name_map[artifact]))
 
     return True
 

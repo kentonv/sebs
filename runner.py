@@ -48,7 +48,8 @@ class ActionRunner(object):
   def __init__(self):
     pass
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, config,
+          real_name_map, lock):
     """Executes the given action.  Returns true if the command succeeds, false
     if it fails.  |inputs| and |outputs| are lists of artifacts that are the
     inputs and outputs of this action, as determined by calling
@@ -58,18 +59,19 @@ class ActionRunner(object):
     raise NotImplementedError
 
 class _CommandContextImpl(CommandContext):
-  def __init__(self, working_dir, pending_message, verbose, lock):
+  def __init__(self, working_dir, pending_message, verbose, real_name_map,lock):
     self.__working_dir = working_dir
     self.__temp_files_for_mem = {}
     self.__pending_message = pending_message
     self.__verbose = verbose
+    self.__real_name_map = real_name_map
     self.__lock = lock
 
     self.__original_text = list(self.__pending_message.text)
     self.__verbose_text = []
 
   def get_disk_path(self, artifact, use_temporary=True):
-    filename = artifact.filename
+    filename = self.__real_name_map[artifact]
     result = self.__working_dir.get_disk_path(filename)
     if result is None and use_temporary:
       if filename in self.__temp_files_for_mem:
@@ -98,7 +100,7 @@ class _CommandContextImpl(CommandContext):
       return result
 
   def read(self, artifact):
-    filename = artifact.filename
+    filename = self.__real_name_map[artifact]
     if filename in self.__temp_files_for_mem:
       file = open(self.__temp_files_for_mem[filename], "rU")
       result = file.read()
@@ -108,7 +110,7 @@ class _CommandContextImpl(CommandContext):
       return self.__working_dir.read(filename)
 
   def write(self, artifact, content):
-    filename = artifact.filename
+    filename = self.__real_name_map[artifact]
     if filename in self.__temp_files_for_mem:
       file = open(self.__temp_files_for_mem[filename], "wb")
       file.write(content)
@@ -173,20 +175,24 @@ class SubprocessRunner(ActionRunner):
     self.__console = console
     self.__verbose = verbose
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, config,
+          real_name_map, lock):
     typecheck(action, Action)
 
     pending_message = self.__console.add_pending([
         _config_prefix(config),
         ColoredText(ColoredText.BLUE, [action.verb, ": "]), action.name])
 
+    real_outputs = [ real_name_map[output] for output in outputs ]
+
     # Make sure the output directories exist.
     # TODO(kenton):  Also delete output files from previous runs?
-    for output in outputs:
-      config.root_dir.mkdir(os.path.dirname(output.filename))
+    for output in real_outputs:
+      config.root_dir.mkdir(os.path.dirname(output))
 
     context = _CommandContextImpl(
-        config.root_dir, pending_message, self.__verbose, lock)
+        config.root_dir, pending_message, self.__verbose, real_name_map, lock)
+
     try:
       log = cStringIO.StringIO()
       result = action.command.run(context, log)
@@ -201,7 +207,7 @@ class SubprocessRunner(ActionRunner):
       if not result:
         # Set modification time of all outputs to zero to make sure they are
         # rebuilt on the next run.
-        self.__reset_mtime(config.root_dir, outputs)
+        self.__reset_mtime(config.root_dir, real_outputs)
 
         pending_message.finish(
             [ColoredText(ColoredText.RED, "ERROR: ")] + final_text)
@@ -210,14 +216,14 @@ class SubprocessRunner(ActionRunner):
     except KeyboardInterrupt:
       # Like above.
       context.resolve_mem_files()
-      self.__reset_mtime(config.root_dir, outputs)
+      self.__reset_mtime(config.root_dir, real_outputs)
       pending_message.finish(
             [ColoredText(ColoredText.RED, "CANCEL: "), pending_message.text])
       raise
     except:
       # Like above.
       context.resolve_mem_files()
-      self.__reset_mtime(config.root_dir, outputs)
+      self.__reset_mtime(config.root_dir, real_outputs)
       pending_message.finish(
             [ColoredText(ColoredText.RED, "ERROR: "), pending_message.text])
       raise
@@ -232,10 +238,10 @@ class SubprocessRunner(ActionRunner):
 
     return True
 
-  def __reset_mtime(self, dir, artifacts):
-    for artifact in artifacts:
+  def __reset_mtime(self, dir, real_outputs):
+    for output in real_outputs:
       try:
-        dir.touch(artifact.filename, 0)
+        dir.touch(output, 0)
       except Exception:
         pass
 
@@ -261,9 +267,10 @@ class CachingRunner(ActionRunner):
   def restore(self, cache):
     self.__cache = cache
 
-  def run(self, action, inputs, disk_inputs, outputs, test_result, config,lock):
+  def run(self, action, inputs, disk_inputs, outputs, test_result, config,
+          real_name_map, lock):
     (can_skip, hash) = self.__can_skip(
-        action, inputs, disk_inputs, outputs, config)
+        action, inputs, disk_inputs, outputs, config, real_name_map)
     if can_skip:
       self.__console.write([
           _config_prefix(config),
@@ -274,50 +281,53 @@ class CachingRunner(ActionRunner):
       # Update timestamps so that the builder does not even mark these files
       # dirty if we immediately build again.
       for output in outputs:
-        config.root_dir.touch(output.filename)
+        config.root_dir.touch(real_name_map[output])
       return True
 
     # Clear all outputs from cache since the cached value is now invalid.
     for output in outputs:
       # Set to None instead of actually removing from the map because we'll
       # probably be putting these outputs back into the map momentarily.
-      self.__cache[(config.name, output.filename)] = None
+      self.__cache[(config.name, real_name_map[output])] = None
 
     result = self.__sub_runner.run(
-        action, inputs, disk_inputs, outputs, test_result, config, lock)
+        action, inputs, disk_inputs, outputs, test_result, config,
+        real_name_map, lock)
 
     if result:
       # Action succeeded, so record it in the cache.  First we need to refresh
       # the disk input list.
-      enumerator = _DiskInputCollector(config.root_dir)
+      enumerator = _DiskInputCollector(config.root_dir, real_name_map)
       action.command.enumerate_artifacts(enumerator)
 
       # Must recompute hash if it was not computed before or if the disk inputs
       # changed.
       if hash is None or set(disk_inputs) != set(enumerator.disk_inputs):
         hash = self.__hash(
-            action, inputs, enumerator.disk_inputs, outputs, config.root_dir)
+            action, inputs, enumerator.disk_inputs, outputs, config.root_dir,
+            real_name_map)
 
       # Set new hash on all outputs.
       for output in outputs:
-        self.__cache[(config.name, output.filename)] = hash
+        self.__cache[(config.name, real_name_map[output])] = hash
 
     return result
 
-  def __can_skip(self, action, inputs, disk_inputs, outputs, config):
+  def __can_skip(self, action, inputs, disk_inputs, outputs, config,
+                 real_name_map):
     # There should be no such thing as an action without outputs, but if we
     # see one we'll do the conservative thing and not skip it.
     if len(outputs) == 0:
       return (False, None)
 
     # Look up the hash of the action which produced these outputs last time.
-    last_hash = self.__cache.get((config.name, outputs[0].filename))
+    last_hash = self.__cache.get((config.name, real_name_map[outputs[0]]))
     if last_hash is None:
       return (False, None)    # Nothing in cache, must re-run.
 
     # All outputs must have the same hash.
     for output in outputs[1:]:
-      if self.__cache.get((config.name, output.filename)) != last_hash:
+      if self.__cache.get((config.name, real_name_map[output])) != last_hash:
         return (False, None)
 
     # All disk inputs must exist.
@@ -327,24 +337,24 @@ class CachingRunner(ActionRunner):
 
     # Compute new hash and compare.
     new_hash = self.__hash(
-        action, inputs, disk_inputs, outputs, config.root_dir)
+        action, inputs, disk_inputs, outputs, config.root_dir, real_name_map)
     if new_hash != last_hash:
       return (False, new_hash)
 
     # Make sure all outputs exist.  We do this last to avoid touching the
     # filesystem when we don't have to.
     for output in outputs:
-      if not config.root_dir.exists(output.filename):
+      if not config.root_dir.exists(real_name_map[output]):
         return (False, new_hash)
 
     return (True, new_hash)
 
-  def __hash(self, action, inputs, disk_inputs, outputs, dir):
+  def __hash(self, action, inputs, disk_inputs, outputs, dir, real_name_map):
     # Security is not a concern here, so MD5 is OK and probably faster than
     # more-secure algorithms.
     hasher = md5.md5()
 
-    input_names = [input.filename for input in inputs]
+    input_names = [real_name_map[input] for input in inputs]
     input_names.sort()
     for input in input_names:
       hasher.update("i")
@@ -372,7 +382,7 @@ class CachingRunner(ActionRunner):
       hasher.update(content)
       content = None
 
-    output_names = [output.filename for output in outputs]
+    output_names = [real_name_map[output] for output in outputs]
     output_names.sort()
     for output in output_names:
       hasher.update("o")
@@ -384,9 +394,10 @@ class CachingRunner(ActionRunner):
     return hasher.digest()
 
 class _DiskInputCollector(ArtifactEnumerator):
-  def __init__(self, root_dir):
+  def __init__(self, root_dir, real_name_map):
     typecheck(root_dir, Directory)
     self.__root_dir = root_dir
+    self.__real_name_map = real_name_map
     self.disk_inputs = []
 
   def add_input(self, artifact):
@@ -402,11 +413,11 @@ class _DiskInputCollector(ArtifactEnumerator):
     # We assume the artifact is clean since we only use DiskInputCollector after
     # the command has run, and the command would not have been run if any inputs
     # were dirty.
-    return self.__root_dir.read(artifact.filename)
+    return self.__root_dir.read(self.__real_name_map[artifact])
 
   def read_previous_output(self, artifact):
-    if self.__root_dir.exists(artifact.filename):
-      return self.__root_dir.read(artifact.filename)
+    if self.__root_dir.exists(self.__real_name_map[artifact]):
+      return self.__root_dir.read(self.__real_name_map[artifact])
     else:
       return None
 

@@ -66,19 +66,26 @@ class _ArtifactEnumeratorImpl(ArtifactEnumerator):
     self.disk_inputs.append(filename)
 
   def read(self, artifact):
+    # Note:  Can't call state_map.read_if_clean because it won't record all
+    #   the artifacts it reads as inputs.
     self.inputs.append(artifact)
     if self.__state_map.artifact_state(self.__config, artifact).is_dirty:
       return None
     else:
-      return self.__config.root_dir.read(artifact.filename)
+      real_name = artifact.real_name(self.read)
+      if real_name is None:
+        return None
+      else:
+        return self.__config.root_dir.read(real_name)
 
   def read_previous_output(self, artifact):
     if artifact.action is not self.__action:
       raise DefinitionError("%s is not an output of %s." %
                             (artifact, self.__action))
 
-    if self.__config.root_dir.exists(artifact.filename):
-      return self.__config.root_dir.read(artifact.filename)
+    real_name = artifact.real_name(self.read)
+    if real_name is not None and self.__config.root_dir.exists(real_name):
+      return self.__config.root_dir.read(real_name)
     else:
       return None
 
@@ -91,11 +98,12 @@ class _ArtifactState(object):
     self.artifact = artifact
     self.config = config
 
-    if root_dir.exists(artifact.filename):
-      self.timestamp = root_dir.getmtime(artifact.filename)
+    real_name = state_map.real_name(config, artifact)
+    if real_name is not None and root_dir.exists(real_name):
+      self.timestamp = root_dir.getmtime(real_name)
       self.is_dirty = self.__decide_if_dirty(state_map)
     elif artifact.action is not None:
-      # Derived artifact doesn't exist yet.
+      # Derived artifact doesn't exist yet, or we don't yet know its name.
       self.timestamp = -1
       self.is_dirty = True
     else:
@@ -260,6 +268,19 @@ class _StateMap(object):
       self.__actions[(config, action)] = result
     return result
 
+  def real_name(self, config, artifact):
+    return artifact.real_name(
+      lambda sub_artifact: self.read_if_clean(config, sub_artifact))
+
+  def read_if_clean(self, config, artifact):
+    state = self.artifact_state(config, artifact)
+    if state.is_dirty:
+      return None
+    real_name = artifact.real_name(self.get_read_if_clean(state.config))
+    if real_name is None:
+      return None
+    return state.config.root_dir.read(real_name)
+
 class Builder(object):
   def __init__(self, console):
     typecheck(console, Console)
@@ -363,12 +384,18 @@ class Builder(object):
     test_result = None
     if action_state.test is not None:
       test_result = action_state.test.test_result_artifact
+
+    real_name_map = {}
+    for artifact in action_state.inputs + action_state.outputs:
+      real_name_map[artifact] = self.__state_map.real_name(config, artifact)
+
     self.__num_pending = self.__num_pending - 1
     if not action_runner.run(action, action_state.inputs,
                                      action_state.disk_inputs,
                                      action_state.outputs,
                                      test_result,
                                      config,
+                                     real_name_map,
                                      self.__lock):
       if not self.failed:
         self.__console.write(ColoredText(ColoredText.RED, "BUILD FAILED"))
@@ -412,7 +439,8 @@ class Builder(object):
 
     had_failure = False
     for name, config, test, cached in self.__tests:
-      result = config.root_dir.read(test.test_result_artifact.filename)
+      result = config.root_dir.read(
+          self.__state_map.real_name(config, test.test_result_artifact))
 
       suffix = ""
       if cached:

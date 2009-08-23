@@ -70,12 +70,8 @@ class ShellTest(_sebs.Test):
     runfiles_action = self.context.action(self, "setup")
     runfiles_middleman = self.context.memory_artifact(
         runfiles_name, runfiles_action)
-    runfiles = {}
-    for data in args.data:
-      runfiles[data.filename] = data
-
     runfiles_action.set_command(
-        _sebs.MirrorCommand(runfiles, runfiles_dir, runfiles_middleman))
+        _sebs.MirrorCommand(args.data, runfiles_dir, runfiles_middleman))
 
     action = self.context.action(self, "test")
     src_name = self.context.local_filename(args.src)

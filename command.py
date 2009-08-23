@@ -661,21 +661,20 @@ class MirrorCommand(Command):
   It may use symbolic links, hard links, or copies depending on what the OS
   supports."""
 
-  def __init__(self, link_map, output_dir, dummy_output_artifact):
-    typecheck(link_map, dict)
+  def __init__(self, artifacts, output_dir, dummy_output_artifact):
+    typecheck(artifacts, list)
     typecheck(output_dir, basestring)
     typecheck(dummy_output_artifact, Artifact)
 
-    for key, value in link_map.iteritems():
-      typecheck(key, basestring)
-      typecheck(value, Artifact)
+    for artifact in artifacts:
+      typecheck(artifact, Artifact)
 
-    self.__link_map = link_map
+    self.__artifacts = artifacts
     self.__output_dir = output_dir
     self.__dummy_output_artifact = dummy_output_artifact
 
   def enumerate_artifacts(self, artifact_enumerator):
-    for input in self.__link_map.itervalues():
+    for input in self.__artifacts:
       artifact_enumerator.add_input(input)
     artifact_enumerator.add_output(self.__dummy_output_artifact)
 
@@ -685,9 +684,9 @@ class MirrorCommand(Command):
     if not os.path.exists(dir):
       os.makedirs(dir)
 
-    for key, value in self.__link_map.iteritems():
-      source = context.get_disk_path(value, use_temporary=False)
-      dest = os.path.join(dir, key)
+    for artifact in self.__artifacts:
+      source = context.get_disk_path(artifact, use_temporary=False)
+      dest = os.path.join(dir, artifact.real_name(context.read))
 
       parent = os.path.dirname(dest)
       if not os.path.exists(parent):
@@ -695,11 +694,7 @@ class MirrorCommand(Command):
 
       if source is None:
         log.write("%s: cannot create link to virtual file.\n" %
-                  self.__source_artifact.filename)
-        return False
-      if dest is None:
-        log.write("%s: cannot create link in virtual location.\n" %
-                  self.__source_artifact.filename)
+                  artifact.filename)
         return False
       if not os.path.exists(source):
         log.write("%s: file not found.\n" % source)
@@ -724,22 +719,21 @@ class MirrorCommand(Command):
         return False
 
     context.write(self.__dummy_output_artifact,
-                  "\n".join(self.__link_map.iterkeys()))
+        "\n".join([artifact.filename for artifact in self.__artifacts]))
 
     return True
 
   def print_(self, output):
-    output.write("linktree %s {" % self.__output_dir)
-    for key, value in self.__link_map.iteritems():
-      output.write("  %s -> %s\n" % (key, value.filename))
+    output.write("mirror @%s {" % self.__output_dir)
+    for artifact in self.__artifacts:
+      output.write("  %s\n" % artifact.filename)
     output.write("}")
 
   def hash(self, hasher):
     hasher.update("LinkCommand:")
-    for key, value in self.__link_map.iteritems():
+    for artifact in self.__artifacts:
       hasher.update("+")
-      _hash_string_and_length(key, hasher)
-      _hash_string_and_length(value.filename, hasher)
+      _hash_string_and_length(artifact.filename, hasher)
     hasher.update("-")
     _hash_string_and_length(self.__output_dir, hasher)
     _hash_string_and_length(self.__dummy_output_artifact.filename, hasher)

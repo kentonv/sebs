@@ -71,7 +71,12 @@ class Artifact(object):
   (accessible as self.context in the body of any Rule) to create artifacts.
 
   Attributes:
-    filename      Name of the file relative to the top of the project.
+    filename      Name of the file relative to the top of the project.  Note
+                  that for non-source files, this may not be the exact name
+                  under all configurations, if configured_name is not None.  So,
+                  you should never attempt to actually access the file using
+                  this name -- instead, use an interface  which maps Artifact
+                  objects to real file names, like CommandContext.
     action        The Action which creates this file, or None if this is not
                   a generated file.  If the file is generated, then it may not
                   actually exist yet; the Artifact is a placeholder.
@@ -83,19 +88,36 @@ class Artifact(object):
                   alternate configuration is "host", which means that the
                   artifact should be compiled such that it may be executed on
                   the host machine (the machine performing the build), even if
-                  we are currently cross-compiling."""
+                  we are currently cross-compiling.
+    configured_name  If the file has the same name under all configurations
+                  (which is always true for source files), this is None.
+                  Otherwise, this is a list where each element is a string or
+                  an Artifact.  The configured name is derived by replacing
+                  each Artifact in this list with that Artifact's contents
+                  (after it has been built) and then concatenating the list.
+                  The configured name should generally be as similar as possible
+                  to |filename|.  This option mainly exists to deal with the
+                  fact that Windows binaries have the ".exe" extension."""
 
   def __init__(self, filename, action = None,
-               alt_artifact = None, alt_config = None):
+               alt_artifact = None, alt_config = None,
+               configured_name = None):
     typecheck(filename, basestring)
     typecheck(action, Action)
     typecheck(alt_artifact, Artifact)
     typecheck(alt_config, basestring)
 
+    if configured_name is not None:
+      typecheck(configured_name, list)
+      for part in configured_name:
+        if not isinstance(part, Artifact):
+          typecheck(part, basestring)
+
     self.filename = filename
     self.action = action
     self.alt_artifact = alt_artifact
     self.alt_config = alt_config
+    self.configured_name = configured_name
 
   def contents(self):
     """Returns a ContentToken for this Artifact, which can be used when building
@@ -106,6 +128,26 @@ class Artifact(object):
 
   def __repr__(self):
     return "<Artifact '%s'>" % self.filename
+
+  def real_name(self, read_artifact):
+    """Computes the real name of this artifact.  If configured_name is None,
+    then this just returns filename.  Otherwise, it attempts to compute the
+    real name based on configured_name.  read_artifact is a callable value
+    which takes an artifact as the parameter and returns that artifact's
+    contents.  read_artifact may also return None, in which case real_name
+    will return None."""
+
+    if self.configured_name is None:
+      return self.filename
+
+    parts = []
+    for part in self.configured_name:
+      if isinstance(part, Artifact):
+        part = read_artifact(part)
+        if part is None:
+          return None
+      parts.append(part)
+    return "".join(parts)
 
 class ContentToken(object):
   """A placeholder for the contents of a file.  See Artifact.contents() and
@@ -253,7 +295,7 @@ class Context(object):
 
     raise NotImplementedError
 
-  def intermediate_artifact(self, filename, action):
+  def intermediate_artifact(self, filename, action, configured_name=None):
     """Returns an Artifact representing an intermediate artifact which will be
     generated at build time by the given action and placed in the tmp
     directory.
@@ -264,7 +306,9 @@ class Context(object):
                   and replacing 'src' with 'tmp').  In other words, each
                   directory in the source tree has its own namespace for
                   intermediate files.
-      action      The action which generates this artifact."""
+      action      The action which generates this artifact.
+      configured_name  Corresponds to the attribute of Artifact, but is relative
+                  to the SEBS file's tmp directory.  Not usually used."""
 
     raise NotImplementedError
 
@@ -300,7 +344,7 @@ class Context(object):
     else:
       return self.intermediate_artifact(basename + extension, action)
 
-  def output_artifact(self, directory, filename, action):
+  def output_artifact(self, directory, filename, action, configured_name=None):
     """Returns an Artifact representing an output artifact which is suitable
     for installation.
 
@@ -308,7 +352,9 @@ class Context(object):
       directory    Indicates the top-level output directory where this artifact
                    will be written, e.g. 'bin' or 'lib'.
       filename     The output file name relative to the output directory.
-      action       The action which generates this output."""
+      action       The action which generates this output.
+      configured_name  Corresponds to the attribute of Artifact, but is relative
+                   to the SEBS file's tmp directory.  Not usually used."""
 
     raise NotImplementedError
 

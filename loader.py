@@ -99,12 +99,13 @@ class _ContextImpl(Context):
     return self.__loader.source_artifact(
       os.path.join("env/set", env_name))
 
-  def intermediate_artifact(self, filename, action):
-    self.__validate_artifact_name(filename)
+  def intermediate_artifact(self, filename, action, configured_name=None):
+    self.__validate_artifact_name(filename, configured_name)
     typecheck(action, Action)
 
     return self.__loader.derived_artifact(
-      os.path.join("tmp", self.directory, filename), action)
+      os.path.join("tmp", self.directory, filename), action,
+      configured_name = configured_name)
 
   def memory_artifact(self, filename, action):
     self.__validate_artifact_name(filename)
@@ -113,9 +114,9 @@ class _ContextImpl(Context):
     return self.__loader.derived_artifact(
       os.path.join("mem", self.directory, filename), action)
 
-  def output_artifact(self, directory, filename, action):
+  def output_artifact(self, directory, filename, action, configured_name=None):
     typecheck(directory, basestring)
-    self.__validate_artifact_name(filename)
+    self.__validate_artifact_name(filename, configured_name)
     typecheck(action, Action)
 
     if directory not in ("bin", "include", "lib", "share"):
@@ -123,7 +124,8 @@ class _ContextImpl(Context):
         "'%s' is not a valid output directory." % directory)
 
     return self.__loader.derived_artifact(
-      os.path.join(directory, filename), action)
+      os.path.join(directory, filename), action,
+      configured_name = configured_name)
 
   def configured_artifact(self, artifact, configuration):
     typecheck(artifact, Artifact)
@@ -134,7 +136,7 @@ class _ContextImpl(Context):
   def action(self, *vargs, **kwargs):
     return Action(*vargs, **kwargs)
 
-  def __validate_artifact_name(self, filename):
+  def __validate_artifact_name(self, filename, configured_name=None):
     typecheck(filename, basestring)
     normalized = os.path.normpath(filename).replace("\\", "/")
     if filename != normalized:
@@ -147,6 +149,8 @@ class _ContextImpl(Context):
         "File '%s' points outside the surrounding directory.  To "
         "include a file from another directory, that directory must explicitly "
         "export it." % filename)
+
+    # TODO(kenton):  Some sort of validation of configured_name.
 
   def __validate_env_name(self, name):
     typecheck(name, basestring)
@@ -318,7 +322,7 @@ class Loader(object):
     self.__source_artifacts[filename] = result
     return result
 
-  def derived_artifact(self, filename, action):
+  def derived_artifact(self, filename, action, configured_name=None):
     typecheck(filename, basestring)
     typecheck(action, Action)
 
@@ -330,6 +334,6 @@ class Loader(object):
          self.__derived_artifacts[filename].action.rule.name))
 
     filename = os.path.normpath(filename).replace("\\", "/")
-    result = Artifact(filename, action)
+    result = Artifact(filename, action, configured_name = configured_name)
     self.__derived_artifacts[filename] = result
     return result
