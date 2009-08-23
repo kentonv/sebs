@@ -74,7 +74,8 @@ class Test(sebs.Test):
       implicit.extend(dep.srcs)
     action = self.context.action(self, "test", args.main.filename)
     output = self.context.derived_artifact(args.main, "_output.txt", action)
-    result = self.context.derived_artifact(args.main, "_result", action)
+    result = self.context.derived_artifact(args.main, "_result", action,
+                                           inmem=True)
 
     action.set_command(sebs.SubprocessCommand(action, ["python", args.main],
                                               implicit = implicit,

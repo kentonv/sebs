@@ -278,10 +278,11 @@ class Context(object):
 
     raise NotImplementedError
 
-  def derived_artifact(self, artifact, extension, action):
+  def derived_artifact(self, artifact, extension, action, inmem=False):
     """Returns an artifact whose name is derived from the given artifact, with
     the file extension replaced with |extension| (a string).  The new artifact
-    behaves like an intermediate artifact."""
+    behaves like an intermediate artifact, unless |inmem| is True, in which
+    case it behaves like a memory artifact."""
 
     typecheck(artifact, Artifact)
     typecheck(extension, basestring)
@@ -291,7 +292,10 @@ class Context(object):
     if filename is None:
       filename = artifact.filename.replace("/", "_")
     basename, _ = os.path.splitext(filename)
-    return self.intermediate_artifact(basename + extension, action)
+    if inmem:
+      return self.memory_artifact(basename + extension, action)
+    else:
+      return self.intermediate_artifact(basename + extension, action)
 
   def output_artifact(self, directory, filename, action):
     """Returns an Artifact representing an output artifact which is suitable
