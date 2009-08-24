@@ -32,6 +32,12 @@
 import os.path
 import md5
 
+_python = sebs.import_("python.sebs")
+
+_run_test = _python.Binary(name = "run_test",
+                           main = "sebs.run_test",
+                           srcs = [ "run_test.py" ])
+
 class _EnvironmentOption(sebs.Rule):
   argument_spec = sebs.ArgumentSpec(
       env_name = str,
@@ -71,10 +77,11 @@ def _option(env_name, default, description):
 
 cc       = _option("CC"      , "cc"    , "C compiler"             )
 cxx      = _option("CXX"     , "c++"   , "C++ compiler"           )
-ar       = _option("AR"      , "ar"    , "Static library archiver")
+ar       = _option("AR"      , "ar"    , "static library archiver")
 cflags   = _option("CFLAGS"  , "-O2 -g", "C compiler flags"       )
 cxxflags = _option("CXXFLAGS", cflags  , "C++ compiler flags"     )
 ldflags  = _option("LDFLAGS" , ""      , "linker flags"           )
+testflags = _option("TESTFLAGS", ""    , "test runner flags"      )
 
 class SystemLibrary(sebs.Rule):
   argument_spec = sebs.ArgumentSpec(name = str,
@@ -263,6 +270,9 @@ class Test(sebs.Test):
     self.__binary_rule = Binary(context = self.context, **args.__dict__)
     self.__binary_rule.label = self.label
     self.__binary_rule.expand_once()
+    testflags.expand_once()
+    _run_test.expand_once()
+    test_runner = self.context.configured_artifact(_run_test.binary, "host")
 
     action = self.context.action(self, "test")
     output = self.context.intermediate_artifact(
@@ -270,10 +280,12 @@ class Test(sebs.Test):
     result = self.context.memory_artifact(
         "%s_result" % self.__binary_rule.anonymous_name(), action)
     action.set_command(
-        sebs.SubprocessCommand(action, [self.__binary_rule.binary],
-                               capture_stdout = output,
-                               capture_stderr = output,
-                               capture_exit_status = result))
+        sebs.SubprocessCommand(
+          action,
+          [test_runner, testflags.value, self.__binary_rule.binary],
+          capture_stdout = output,
+          capture_stderr = output,
+          capture_exit_status = result))
 
     self.test_result_artifact = result
     self.test_output_artifact = output

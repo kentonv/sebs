@@ -62,6 +62,7 @@ class Binary(sebs.Rule):
       sebs.SubprocessCommand(action,
         [make_bin, "-m", args.main, "-o", output, "-p", path] +
         transitive_sources))
+    self.binary = output
     self.outputs = [output]
 
 class Test(sebs.Test):
