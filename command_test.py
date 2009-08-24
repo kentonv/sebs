@@ -476,6 +476,15 @@ class SubprocessCommandTest(unittest.TestCase):
                            ["(content   with\nspaces)"],
                            "($(filename))")
 
+    self.assertFormattedAs(["(", SubprocessCommand.Quoted(["foo bar", "baz"]),
+                            ")"],
+                           ["(", "'foo bar' baz", ")"])
+    self.assertFormattedAs([SubprocessCommand.Quoted(["'hello'"])],
+                           ["\"'hello'\""])
+    self.assertFormattedAs([SubprocessCommand.Quoted(["(", artifact, ")"])],
+                           ["'(' disk/filename ')'"],
+                           "'(' filename ')'")
+
   def assertFormattedAs(self, args, result, printed = None):
     context = MockCommandContext(self.__dir, diskpath_prefix = "disk/")
     command = SubprocessCommand(self.__action, list(args))

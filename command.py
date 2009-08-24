@@ -35,6 +35,7 @@ Commands define exactly what an Action does.
 
 import cStringIO
 import os
+import pipes
 import shutil
 import subprocess
 
@@ -369,9 +370,22 @@ class SubprocessCommand(Command):
   """Command which launches a separate process."""
 
   class DirectoryToken(object):
+    """Can be used in an argument list to indicate that the on-disk location
+    of the given virtual directory should be used as the argument."""
+
     def __init__(self, dirname):
       typecheck(dirname, basestring)
       self.dirname = dirname
+
+  class Quoted(object):
+    """Can be used in an argument list to indicate that the given sublist of
+    args should be interpreted like a top-level arg list, then combined into
+    one string using shell quoting rules such that passing said string to
+    sh -c would execute the command represented by the arg list.  This can
+    be used e.g. to safely pass a command to ssh to be run remotely."""
+
+    def __init__(self, args):
+      self.args = args
 
   def __init__(self, action, args, implicit = [],
                capture_stdout=None, capture_stderr=None,
@@ -537,7 +551,8 @@ class SubprocessCommand(Command):
       elif not isinstance(arg, basestring) and \
            not isinstance(arg, Artifact) and \
            not isinstance(arg, ContentToken) and \
-           not isinstance(arg, SubprocessCommand.DirectoryToken):
+           not isinstance(arg, SubprocessCommand.DirectoryToken) and \
+           not isinstance(arg, SubprocessCommand.Quoted):
         raise TypeError("Invalid argument: %s" % arg)
 
   def __format_args(self, args, context, split_content=True):
@@ -555,6 +570,9 @@ class SubprocessCommand(Command):
           yield content
       elif isinstance(arg, SubprocessCommand.DirectoryToken):
         yield context.get_disk_directory_path(arg.dirname)
+      elif isinstance(arg, SubprocessCommand.Quoted):
+        sub_formatted = self.__format_args(arg.args, context)
+        yield " ".join([pipes.quote(part) for part in sub_formatted])
       elif isinstance(arg, list):
         yield "".join(self.__format_args(
             arg, context, split_content = False))
@@ -610,6 +628,9 @@ class SubprocessCommand(Command):
       elif isinstance(arg, SubprocessCommand.DirectoryToken):
         hasher.update("d")
         _hash_string_and_length(arg.dirname, hasher)
+      elif isinstance(arg, SubprocessCommand.Quoted):
+        hasher.update("q")
+        self.__hash_args(arg.args, hasher)
       elif isinstance(arg, list):
         hasher.update("l")
         self.__hash_args(arg, hasher)
