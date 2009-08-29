@@ -38,6 +38,7 @@ sebs_lib = python.Library(
   srcs = [ "__init__.py",
            "builder.py",
            "command.py",
+           "configuration.py",
            "console.py",
            "core.py",
            "filesystem.py",
@@ -93,4 +94,6 @@ class ShellTest(_sebs.Test):
     self.outputs = []
 
 cpp_test = ShellTest(src = "cpp_test/cpp_test.sh",
-                     data = [sebs, "cpp.sebs", "cpp_test/*"])
+                     data = [sebs, "cpp.sebs", "python.sebs",
+                                   "make_py_binary.py", "run_test.py",
+                                   "__init__.py", "cpp_test/*"])

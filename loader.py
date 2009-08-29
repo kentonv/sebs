@@ -82,8 +82,12 @@ class _ContextImpl(Context):
       else:
         self.__validate_artifact_name(filename)
         full_name = os.path.join("src", self.directory, filename)
+        had_match = False
         for filename in self.__root_dir.expand_glob(full_name):
           result.append(self.__loader.source_artifact(filename))
+          had_match = True
+        if not had_match:
+          result.append(self.__loader.source_artifact(full_name))
 
     return result
 

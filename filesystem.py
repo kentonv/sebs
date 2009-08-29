@@ -199,6 +199,9 @@ class VirtualDirectory(Directory):
   def save(self):
     return self.__files
 
+  def empty(self):
+    return not bool(self.__files)
+
   def restore(self, state):
     typecheck(state, dict)
     self.__files = state

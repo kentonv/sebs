@@ -98,6 +98,7 @@ class _ArtifactState(object):
       # until we can compute this artifact's name, and we know that any
       # dependent actions won't run until the creating action runs.  So we're
       # all good.
+      assert artifact.action is not None
       self.timestamp = -1
       self.is_dirty = True
     elif root_dir.exists(real_name):
