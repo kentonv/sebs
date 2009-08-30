@@ -778,7 +778,7 @@ class SubprocessCommand(Command):
           script_writer.artifact_filename_expression(
             self.__capture_stderr))
     if self.__capture_exit_status is not None:
-      command_parts.append("&& (%s) || (%s)" %
+      command_parts.append("&& %s || %s" %
         (script_writer.echo_expression("true", self.__capture_exit_status),
          script_writer.echo_expression("false", self.__capture_exit_status)))
 
@@ -963,5 +963,6 @@ class MirrorCommand(Command):
           (disk_filename, output_dir, input.filename))
 
     list = "\n".join([artifact.filename for artifact in self.__artifacts])
-    script_writer.echo_expression(
-        pipes.quote(list), self.__dummy_output_artifact)
+    script_writer.add_command(
+        script_writer.echo_expression(
+          pipes.quote(list), self.__dummy_output_artifact))
