@@ -71,6 +71,7 @@ from sebs.helpers import typecheck
 from sebs.loader import Loader, BuildFile
 from sebs.console import make_console, ColoredText
 from sebs.runner import SubprocessRunner, CachingRunner
+from sebs.script import ScriptBuilder
 
 class UsageError(Exception):
   pass
@@ -218,11 +219,11 @@ def build(config, argv):
   builder = Builder(console)
 
   if argv[0] == "test":
-    for rule in list(_args_to_rules(loader, args)):
+    for rule in _args_to_rules(loader, args):
       if isinstance(rule, Test):
         builder.add_test(config, rule)
   else:
-    for rule in list(_args_to_rules(loader, args)):
+    for rule in _args_to_rules(loader, args):
       builder.add_rule(config, rule)
 
   thread_objects = []
@@ -251,6 +252,37 @@ def build(config, argv):
       return 1
 
   return 0
+
+# --------------------------------------------------------------------
+
+def script(config, argv):
+  try:
+    opts, args = getopt.getopt(argv[1:], "o:", [])
+  except getopt.error, message:
+    raise UsageError(message)
+
+  filename = None
+
+  for name, value in opts:
+    if name == "-o":
+      filename = value
+
+  loader = Loader(config.root_dir)
+  builder = ScriptBuilder()
+
+  for rule in _args_to_rules(loader, args):
+    if isinstance(rule, Test):
+      builder.add_test(rule)
+    else:
+      builder.add_rule(rule)
+
+  if filename is None:
+    out = sys.stdout
+  else:
+    # Write unix-style newlines regardless of host OS.
+    out = open(filename, "wb")
+
+  builder.write(out)
 
 # --------------------------------------------------------------------
 
@@ -309,6 +341,8 @@ def main(argv):
       return build(config, args)
     elif args[0] == "configure":
       return configure(config, args)
+    elif args[0] == "script":
+      return script(config, args)
     elif args[0] == "clean":
       return clean(config, args)
     else:

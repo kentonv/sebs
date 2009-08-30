@@ -117,6 +117,77 @@ class ArtifactEnumerator(object):
     need to be recompiled."""
     raise NotImplementedError
 
+class ScriptWriter(object):
+  def add_command(self, text):
+    """Add a command which should be executed as part of the current action."""
+    raise NotImplementedError
+
+  def echo_expression(self, expression, output_artifact):
+    """Returns a shell expression which, when evaluated, will set the contents
+    of the given artifact to the expansion of the given expression.  In other
+    words, this usually produces:
+        'echo "%s" > %s' % (expression, output_artifact.filename)
+    But if the output artifact is a memory artifact, it will instead store
+    the result to a variable:
+        '%s="%s"' % (varname(output_artifact), expression)
+    """
+    raise NotImplementedError
+
+  def add_input(self, artifact):
+    """Report that the given artifact is an input to the command."""
+    raise NotImplementedError
+
+  def add_output(self, artifact):
+    """Report that the given artifact is an output to the command."""
+    raise NotImplementedError
+
+  def artifact_filename_expression(self, artifact):
+    """Returns a shell expression which expands to the on-disk name of the
+    given artifact.  Calling this method also implies calls to
+    add_input() for any artifacts whose contents determine part of this
+    artifact's name.  Furthermore, if the artifact is an in-memory artifact then
+    this method implies that a temporary file representing it must be created
+    for the duration of this action, or until the end of the current
+    conditional clause, whichever comes first."""
+    raise NotImplementedError
+
+  def artifact_content_expression(self, artifact):
+    """Returns a shell expression which expands to the contents of the given
+    artifact.  For memory artifacts this is just a simple variable expansion
+    whereas for on-disk artifacts it is $(<filename)."""
+    raise NotImplementedError
+
+  def get_disk_directory_path(self, dir):
+    """Same as CommandContext.get_disk_directory_path()."""
+    raise NotImplementedError
+
+  def set_status(self, status_expression):
+    """Says that when the action is complete, the given shell expression should
+    be expanded and the result printed as the "status" -- a short message
+    appearing on the same line as the action name itself indicating the
+    result."""
+    raise NotImplementedError
+
+  def enter_conditional(self, expression, required_artifacts_for_expression):
+    """Begin a block that should only be executed if the given expression
+    expands to the word "true".  required_artifacts_for_expression is a list
+    of artifacts which must be built before the expression can be evaluated.
+    Between a call to enter_conditional() and a corresponding call to
+    enter_else() or leave_conditional(), all method calls are interpreted
+    as being only relevant if the condition was true."""
+    raise NotImplementedError
+
+  def enter_else(self):
+    """Called some time after enter_conditional() to move to the "else" clause
+    of the conditional.  If no else clause is needed, do not call this; go
+    straight to leave_conditional()."""
+    raise NotImplementedError
+
+  def leave_conditional(self):
+    """Called to end the conditional started by a previous call to
+    enter_conditional()."""
+    raise NotImplementedError
+
 class Command(CommandBase):
   """Represents something which an Action does, e.g. executing a shell command.
   Command implementations are not allowed to create new Actions or Artifacts --
@@ -155,6 +226,11 @@ class Command(CommandBase):
     although you do not actually need to write any such parser."""
     raise NotImplementedError
 
+  def write_script(self, script_writer):
+    """Given a ScriptWriter object, uses it to write a shell script fragment
+    corresponding to this command."""
+    raise NotImplementedError
+
 def _hash_string_and_length(string, hasher):
   hasher.update(str(len(string)))
   hasher.update(" ")
@@ -189,6 +265,11 @@ class EchoCommand(Command):
     _hash_string_and_length(self.__content, hasher)
     _hash_string_and_length(self.__output_artifact.filename, hasher)
 
+  def write_script(self, script_writer):
+    script_writer.add_command(
+        script_writer.echo_expression(
+          pipes.quote(self.__content), self.__output_artifact))
+
 # ====================================================================
 
 class EnvironmentCommand(Command):
@@ -198,7 +279,7 @@ class EnvironmentCommand(Command):
   the latter case, the artifact's contents are copied into the output."""
 
   def __init__(self, rule_context, env_name, output_artifact, default=None,
-               set_status=False):
+               set_status=False, error_message_if_unset=None):
     typecheck(rule_context, Context)
     typecheck(env_name, str)
     typecheck(output_artifact, Artifact)
@@ -210,6 +291,11 @@ class EnvironmentCommand(Command):
     self.__output_artifact = output_artifact
     self.__default = default
     self.__set_status = set_status
+    if default is None and error_message_if_unset is None:
+      self.__error_message_if_unset = \
+          "Required environment variable not set: %s" % env_name
+    else:
+      self.__error_message_if_unset = error_message_if_unset
 
   def enumerate_artifacts(self, artifact_enumerator):
     typecheck(artifact_enumerator, ArtifactEnumerator)
@@ -227,7 +313,7 @@ class EnvironmentCommand(Command):
     if context.read(self.__env_set_artifact) == "true":
       value = context.read(self.__env_artifact)
     elif self.__default is None:
-      log.write("Environment variable not set: %s\n" % self.__env_name)
+      log.write(self.__error_message_if_unset + "\n")
       return False
     elif isinstance(self.__default, Artifact):
       value = context.read(self.__default)
@@ -265,6 +351,23 @@ class EnvironmentCommand(Command):
       hasher.update("s")
       _hash_string_and_length(self.__default, hasher)
 
+  def write_script(self, script_writer):
+    if self.__default is None:
+      script_writer.add_command(
+          "test \"${%s+set}\" = set || die %s" %
+          (self.__env_name, pipes.quote(self.__error_message_if_unset)))
+      expression = "${%s}" % self.__env_name
+    else:
+      if isinstance(self.__default, Artifact):
+        default = script_writer.artifact_content_expression(self.__default)
+      else:
+        default = pipes.quote(self.__default)
+      expression = "${%s-%s}" % (self.__env_name, default)
+    script_writer.add_command(
+        script_writer.echo_expression(expression, self.__output_artifact))
+    if self.__set_status:
+      script_writer.set_status(expression)
+
 # ====================================================================
 
 class DoAllCommand(Command):
@@ -296,6 +399,10 @@ class DoAllCommand(Command):
     hasher.update(" ")
     for command in self.__subcommands:
       command.hash(hasher)
+
+  def write_script(self, script_writer):
+    for command in self.__subcommands:
+      command.write_script(script_writer)
 
 # ====================================================================
 
@@ -363,6 +470,17 @@ class ConditionalCommand(Command):
     else:
       hasher.update("+")
       self.__false_command.hash(hasher)
+
+  def write_script(self, script_writer):
+    script_writer.enter_conditional(
+        "test \"%s\" = true" %
+          script_writer.artifact_content_expression(self.__condition_artifact),
+        [self.__condition_artifact])
+    self.__true_command.write_script(script_writer)
+    if self.__false_command is not None:
+      script_writer.enter_else()
+      self.__false_command.write_script(script_writer)
+    script_writer.leave_conditional()
 
 # ====================================================================
 
@@ -527,7 +645,7 @@ class SubprocessCommand(Command):
       def get_disk_directory_path(self, dirname):
         return dirname
       def read(self, artifact):
-        return "$(%s)" % artifact.filename
+        return "$(<%s)" % artifact.filename
 
     output.write(" ".join(self.__format_args(self.__args, DummyContext())))
 
@@ -637,6 +755,64 @@ class SubprocessCommand(Command):
       else:
         raise AssertionError("Invalid argument.")
 
+  def write_script(self, script_writer):
+    for artifact in self.__implicit_artifacts:
+      if self.__action is not None and artifact.action is self.__action:
+        script_writer.add_output(artifact)
+      else:
+        script_writer.add_input(artifact)
+
+    command_parts = []
+    command_parts.append(
+        " ".join(self.__script_args(self.__args, script_writer)))
+
+    if self.__capture_stdout is not None:
+      command_parts.append(">%s" %
+        script_writer.artifact_filename_expression(
+          self.__capture_stdout))
+    if self.__capture_stderr is not None:
+      if self.__capture_stderr is self.__capture_stdout:
+        command_parts.append("2>&1")
+      else:
+        command_parts.append("2>%s" %
+          script_writer.artifact_filename_expression(
+            self.__capture_stderr))
+    if self.__capture_exit_status is not None:
+      command_parts.append("&& (%s) || (%s)" %
+        (script_writer.echo_expression("true", self.__capture_exit_status),
+         script_writer.echo_expression("false", self.__capture_exit_status)))
+
+    command = " ".join(command_parts)
+    if self.__working_dir is not None:
+      raise NotImplementedError(
+          "Scripts for SubprocessCommands with working directories are not "
+          "implemented.")
+      # TODO(kenton):  This doesn't work since all the file names are relative
+      #   to the original directory.
+      working_dir = script_writer.get_disk_directory_path(self.__working_dir)
+      command = "(cd %s && %s)" % (working_dir, command)
+
+    script_writer.add_command(command)
+
+  def __script_args(self, args, script_writer):
+    for arg in args:
+      if isinstance(arg, basestring):
+        yield pipes.quote(arg)
+      elif isinstance(arg, Artifact):
+        yield script_writer.artifact_filename_expression(arg)
+      elif isinstance(arg, ContentToken):
+        yield script_writer.artifact_content_expression(arg.artifact)
+      elif isinstance(arg, SubprocessCommand.DirectoryToken):
+        yield script_writer.get_disk_directory_path(arg.dirname)
+      elif isinstance(arg, SubprocessCommand.Quoted):
+        raise NotImplementedError(
+            "Generating a script for a SubprocessCommand which uses Quoted "
+            "is actually really hard, maybe impossible.")
+      elif isinstance(arg, list):
+        yield "".join(self.__script_args(arg, script_writer))
+      else:
+        raise AssertionError("Invalid argument.")
+
 # ====================================================================
 
 class DepFileCommand(Command):
@@ -674,6 +850,14 @@ class DepFileCommand(Command):
   def hash(self, hasher):
     hasher.update("DepFileCommand:")
     self.__command.hash(hasher)
+
+  def write_script(self, script_writer):
+    # TODO(kenton):  Maybe generate the depfile at the time the script is
+    #   generated?  But we'd have to make sure to strip out system headers,
+    #   and we wouldn't be able to deal with conditional includes very well.
+    #   Maybe that doesn't matter.  Alternatively, maybe we could actually
+    #   include code in the script to parse depfiles?
+    self.__command.write_script(script_writer)
 
 # ====================================================================
 
@@ -751,10 +935,33 @@ class MirrorCommand(Command):
     output.write("}")
 
   def hash(self, hasher):
-    hasher.update("LinkCommand:")
+    hasher.update("MirrorCommand:")
     for artifact in self.__artifacts:
       hasher.update("+")
       _hash_string_and_length(artifact.filename, hasher)
     hasher.update("-")
     _hash_string_and_length(self.__output_dir, hasher)
     _hash_string_and_length(self.__dummy_output_artifact.filename, hasher)
+
+  def write_script(self, script_writer):
+    output_dir = script_writer.get_disk_directory_path(self.__output_dir)
+    made_dirs = set()
+
+    for input in self.__artifacts:
+      script_writer.add_input(input)
+
+      # Make the directory where this file is being linked if it doesn't
+      # already exist.
+      input_dir = os.path.dirname(os.path.join(output_dir, input.filename))
+      if input_dir not in made_dirs:
+        made_dirs.add(input_dir)
+        script_writer.add_command("mkdir -p %s" % pipes.quote(input_dir))
+
+      # Create the link.
+      disk_filename = script_writer.artifact_filename_expression(input)
+      script_writer.add_command("ln %s %s/%s" %
+          (disk_filename, output_dir, input.filename))
+
+    list = "\n".join([artifact.filename for artifact in self.__artifacts])
+    script_writer.echo_expression(
+        pipes.quote(list), self.__dummy_output_artifact)
