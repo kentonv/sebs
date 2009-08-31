@@ -62,6 +62,11 @@ Usage:
 __END__
 }
 
+function die() {
+  echo "$@" >&2
+  exit 1
+}
+
 function eval_assignment() {
   local varname=$(expr "$1" : '\([^=]*\)=.*')
   local value=$(expr "$1" : '[^=]*=\(.*\)')
@@ -113,11 +118,10 @@ if test $do_clean = no; then
   do_build=yes
 fi
 
-# Some helpers.
-function die() {
-  echo "$@" >&2
-  exit 1
-}
+# Clean before we do anything else.
+if test $do_clean = yes; then
+  rm -rf $script_name.cache tmp bin lib share include
+fi
 
 # Read the cache, if present.
 function read_cache() {

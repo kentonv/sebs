@@ -279,10 +279,16 @@ def script(config, argv):
   if filename is None:
     out = sys.stdout
   else:
-    # Write unix-style newlines regardless of host OS.
+    # Binary mode => Write unix-style newlines regardless of host OS.
     out = open(filename, "wb")
 
   builder.write(out)
+
+  if filename is not None:
+    out.close()
+    mask = os.umask(0)
+    os.umask(mask)
+    os.chmod(filename, 0777 & ~mask)
 
 # --------------------------------------------------------------------
 

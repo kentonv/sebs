@@ -217,7 +217,7 @@ class Configuration(object):
       return None
 
   def clean(self, expunge=False):
-    for dir in ["tmp", "bin", "lib", "share", "mem", "env"]:
+    for dir in ["tmp", "bin", "lib", "share", "include", "mem", "env"]:
       if self.root_dir.exists(dir):
         shutil.rmtree(self.root_dir.get_disk_path(dir))
 
